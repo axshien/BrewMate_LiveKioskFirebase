@@ -192,7 +192,10 @@
     if (typeof loadQuizStep === 'function') {
       loadQuizStep('start'); 
     }
-    
+    const allBtn = document.querySelector('.cat-pill[data-cat="all"]');
+    if (allBtn) {
+      filterCat(allBtn, 'all');
+    }
     goTo('menuScreen'); 
   }
 
