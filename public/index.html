@@ -12,7 +12,9 @@
 <!-- ══ WELCOME ══ -->
 <div class="screen active" id="welcomeScreen">
   <div class="welcome-wrap">
-    <div class="welcome-logo">BM</div>
+    <div class="welcome-logo" style="background: transparent; border: none; box-shadow: none;">
+  <img src="chilltop.png" alt="Chilltop Logo" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
+</div>
     <h1 class="welcome-title">BrewMate</h1>
     <div class="welcome-sub">Self-Service Kiosk</div>
     <div class="welcome-divider"></div>
@@ -35,12 +37,24 @@
   </nav>
 
   <div class="menu-body">
-    <!-- Hero -->
+    <!-- Hero Recommendation -->
     <div class="hero-banner">
       <div class="hero-text">
-        <small>☕ daily ritual</small>
-        <h2>What are you<br>craving today?</h2>
+        <small>☕ your virtual barista</small>
+        <h2 id="quiz-question">What's the vibe today?</h2>
+        
+        <div id="quiz-options" class="quiz-buttons" style="margin-top: 15px; display: flex; gap: 8px; flex-wrap: wrap; position: relative; z-index: 2;">
+          </div>
+        
+        <button id="quiz-reset" class="hidden" style="margin-top: 10px; background: none; border: none; color: rgba(255,255,255,0.7); font-size: 12px; cursor: pointer; text-decoration: underline; position: relative; z-index: 2;">Start over</button>
       </div>
+    </div>
+
+    <div id="cravingResultsSection" class="hidden" style="margin-bottom: 24px;">
+      <div class="section-hd">
+        <h3>✨ Recommended for you</h3>
+      </div>
+      <div class="items-grid" id="recommendationContainer"></div>
     </div>
 
     <!-- Pills -->
@@ -141,6 +155,22 @@
       </div>
     </div>
     <button class="btn-outline" id="newOrderBtn">Place another order</button>
+  </div>
+</div>
+
+<!-- ══ Recommendation ══ -->
+
+<div id="confirmation-overlay" class="hidden">
+  <div class="modal-box">
+    <div class="modal-emoji" id="modal-emoji">☕</div>
+    <h3 id="modal-title">Item Name</h3>
+    <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px;">Description</p>
+    <p class="modal-price">Total: <span id="modal-price-value" style="color:var(--primary); font-weight:800;">₱0</span></p>
+    
+    <div class="modal-actions">
+      <button id="btn-cancel-order" class="btn-outline" style="margin: 0; border: 1.5px solid #ddd9ee; color: var(--text);">Go Back</button>
+      <button id="btn-confirm-order" class="btn-place" style="margin-top: 0; padding: 14px;">Add to Order</button>
+    </div>
   </div>
 </div>
 
