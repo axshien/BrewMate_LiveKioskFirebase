@@ -1,24 +1,89 @@
 
-  const BEVERAGES = [
-    {name:'Espresso',       emoji:'☕', price:110, desc:'Double shot', tags:['drink', 'hot', 'strong']},
-    {name:'Cappuccino',     emoji:'🍵', price:135, desc:'Classic Italian', tags:['drink', 'hot', 'milky']},
-    {name:'Cold Brew',      emoji:'🧊', price:155, desc:'Slow-steeped', tags:['drink', 'cold', 'strong']},
-    {name:'Matcha Latte',   emoji:'🍵', price:160, desc:'Ceremonial grade', tags:['drink', 'hot', 'sweet']},
-    {name:'Caramel Macch.', emoji:'☕', price:165, desc:'Vanilla & caramel', tags:['drink', 'hot', 'sweet']},
-    {name:'Iced Americano', emoji:'🧋', price:120, desc:'Bold & refreshing', tags:['drink', 'cold', 'strong']},
-    {name:'Flat White',     emoji:'☕', price:150, desc:'Silky microfoam', tags:['drink', 'hot', 'milky']},
-    {name:'Mocha',          emoji:'🍫', price:155, desc:'Chocolate espresso', tags:['drink', 'hot', 'sweet']},
+  const ALL_ITEMS = [
+    // ESPRESSO
+    {name:'Americano', emoji:'☕', price:65, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'strong']},
+    {name:'Café Latte', emoji:'☕', price:110, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'milky']},
+    {name:'Cappuccino', emoji:'☕', price:110, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'milky']},
+    {name:'Vanilla Latte', emoji:'☕', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'sweet']},
+    {name:'Spanish Latte', emoji:'☕', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'sweet']},
+    {name:'Caramel Macchiato', emoji:'☕', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'sweet']},
+    {name:'Salted Caramel', emoji:'☕', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'sweet']},
+    {name:'Mocha Latte', emoji:'🍫', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'chocolate']},
+    {name:'White Mocha', emoji:'☕', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'sweet']},
+    {name:'Dark Mocha Latte', emoji:'🍫', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'strong', 'chocolate']},
+    {name:'Hazelnut Latte', emoji:'🌰', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'sweet']},
+    {name:'Dirty Matcha', emoji:'🍵', price:120, desc:'16oz', cat:'espresso', tags:['drink', 'hot', 'cold', 'strong']},
+    
+    // NON-COFFEE
+    {name:'Milky Caramel', emoji:'🥛', price:100, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'sweet', 'milky']},
+    {name:'Milky Salted Caramel', emoji:'🥛', price:100, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'sweet', 'milky']},
+    {name:'Milky Mocha', emoji:'🍫', price:100, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'chocolate', 'milky']},
+    {name:'Milky White Mocha', emoji:'🥛', price:100, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'sweet', 'milky']},
+    {name:'Milky Dark Mocha', emoji:'🍫', price:100, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'chocolate', 'milky']},
+    {name:'Milky Hazelnut', emoji:'🌰', price:100, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'sweet', 'milky']},
+    {name:'Milky Strawberry', emoji:'🍓', price:100, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'fruity', 'milky']},
+    {name:'Matcha Latte', emoji:'🍵', price:120, desc:'16oz', cat:'noncoffee', tags:['drink', 'hot', 'cold', 'milky']},
+    {name:'Matcha Strawberry', emoji:'🍵', price:120, desc:'16oz', cat:'noncoffee', tags:['drink', 'cold', 'fruity', 'milky']},
+
+    // MILK TEA
+    {name:'WinterMelon', emoji:'🧋', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold', 'sweet']},
+    {name:'Okinawa', emoji:'🧋', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold', 'sweet']},
+    {name:'Taro', emoji:'🍠', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold', 'sweet']},
+    {name:'Cookies & Cream', emoji:'🍪', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold', 'sweet', 'chocolate']},
+    {name:'Java Chips', emoji:'🍫', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold', 'chocolate']},
+    {name:'Dark Mocha', emoji:'🍫', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold', 'chocolate']},
+    {name:'Mocha', emoji:'☕', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold', 'chocolate']},
+    {name:'Matcha', emoji:'🍵', price:59, desc:'16oz', cat:'milktea', tags:['drink', 'cold']},
+
+    // FRAPPE
+    {name:'Cookies & Cream Frappe', emoji:'🥤', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'sweet']},
+    {name:'White Mocha Frappe', emoji:'🥤', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'sweet']},
+    {name:'Dark Mocha Frappe', emoji:'🥤', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'chocolate']},
+    {name:'Choco Hazelnut Frappe', emoji:'🥤', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'chocolate']},
+    {name:'Choco Strawberry Frappe', emoji:'🍓', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'chocolate', 'fruity']},
+    {name:'Strawberry Frappe', emoji:'🍓', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'fruity']},
+    {name:'Blueberry Frappe', emoji:'🫐', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'fruity']},
+    {name:'Java Chips Frappe', emoji:'🍫', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold', 'chocolate']},
+    {name:'Matcha Frappe', emoji:'🍵', price:120, desc:'16oz', cat:'frappe', tags:['drink', 'cold']},
+
+    // FRUIT TEA & SODA
+    {name:'Strawberry Fruit Tea', emoji:'🍓', price:59, desc:'16oz', cat:'fruittea', tags:['drink', 'cold', 'fruity']},
+    {name:'Blueberry Fruit Tea', emoji:'🫐', price:59, desc:'16oz', cat:'fruittea', tags:['drink', 'cold', 'fruity']},
+    {name:'Kiwi Fruit Tea', emoji:'🥝', price:59, desc:'16oz', cat:'fruittea', tags:['drink', 'cold', 'fruity']},
+    {name:'Passion Fruit Tea', emoji:'🍹', price:59, desc:'16oz', cat:'fruittea', tags:['drink', 'cold', 'fruity']},
+    {name:'Lychee Fruit Tea', emoji:'🍒', price:59, desc:'16oz', cat:'fruittea', tags:['drink', 'cold', 'fruity']},
+    {name:'Lemonade Fruit Tea', emoji:'🍋', price:59, desc:'16oz', cat:'fruittea', tags:['drink', 'cold', 'fruity']},
+    
+    {name:'Strawberry Soda', emoji:'🫧', price:59, desc:'16oz', cat:'soda', tags:['drink', 'cold', 'fruity']},
+    {name:'Blueberry Soda', emoji:'🫧', price:59, desc:'16oz', cat:'soda', tags:['drink', 'cold', 'fruity']},
+    {name:'Kiwi Soda', emoji:'🫧', price:59, desc:'16oz', cat:'soda', tags:['drink', 'cold', 'fruity']},
+    {name:'Lemonade Soda', emoji:'🫧', price:59, desc:'16oz', cat:'soda', tags:['drink', 'cold', 'fruity']},
+    {name:'Passion Soda', emoji:'🫧', price:59, desc:'16oz', cat:'soda', tags:['drink', 'cold', 'fruity']},
+    {name:'Lychee Soda', emoji:'🫧', price:59, desc:'16oz', cat:'soda', tags:['drink', 'cold', 'fruity']},
+
+    // CROFFLES
+    {name:'Classic Waffle', emoji:'🧇', price:90, desc:'Croffle', cat:'croffle', tags:['food', 'classic']},
+    {name:'Classic Choco', emoji:'🍫', price:110, desc:'Croffle', cat:'croffle', tags:['food', 'chocolate']},
+    {name:'Choco Almond', emoji:'🥜', price:110, desc:'Croffle', cat:'croffle', tags:['food', 'chocolate']},
+    {name:'Oreo Dream', emoji:'🍪', price:110, desc:'Croffle', cat:'croffle', tags:['food', 'chocolate']},
+    {name:'Smores', emoji:'🏕️', price:110, desc:'Croffle', cat:'croffle', tags:['food', 'sweet']},
+    {name:'Biscoff', emoji:'🍪', price:120, desc:'Croffle', cat:'croffle', tags:['food', 'sweet']},
+
+    // SANDWICHES
+    {name:'Tuna Sandwich', emoji:'🐟', price:80, desc:'Freshly made', cat:'sandwiches', tags:['food', 'classic']},
+    {name:'Chicken Sandwich', emoji:'🥪', price:80, desc:'Freshly made', cat:'sandwiches', tags:['food', 'classic']},
+    {name:'Ham & Cheese', emoji:'🧀', price:90, desc:'Freshly made', cat:'sandwiches', tags:['food', 'classic']},
+    {name:'Ham & Egg', emoji:'🍳', price:90, desc:'Freshly made', cat:'sandwiches', tags:['food', 'classic']},
+    {name:'Clubhouse', emoji:'🥪', price:160, desc:'Double decker', cat:'sandwiches', tags:['food', 'heavy']},
+
+    // SNACKS
+    {name:'Fries', emoji:'🍟', price:80, desc:'Solo', cat:'snacks', tags:['food', 'classic']},
+    {name:'Flavored Fries', emoji:'🍟', price:90, desc:'Solo', cat:'snacks', tags:['food', 'classic']},
+    {name:'Nachos', emoji:'🧀', price:90, desc:'Solo', cat:'snacks', tags:['food', 'classic']},
+    {name:'Chicken Poppers', emoji:'🍗', price:150, desc:'Bite-sized', cat:'snacks', tags:['food', 'heavy']},
+    {name:'Chix & Fries', emoji:'🍗', price:130, desc:'Combo', cat:'snacks', tags:['food', 'heavy']}
   ];
-  const PASTRIES = [
-    {name:'Butter Croissant', emoji:'🥐', price:75,  desc:'Flaky & buttery', tags:['food', 'classic']},
-    {name:'Blueberry Muffin', emoji:'🫐', price:80,  desc:'Fresh blueberries', tags:['food', 'fruity']},
-    {name:'Banana Bread',     emoji:'🍌', price:70,  desc:'Moist & warm', tags:['food', 'fruity']},
-    {name:'Cinnamon Roll',    emoji:'🌀', price:95,  desc:'House special', tags:['food', 'sweet']},
-    {name:'Choco Danish',     emoji:'🍫', price:85,  desc:'Dark chocolate', tags:['food', 'chocolate']},
-    {name:'Almond Tart',      emoji:'🥧', price:90,  desc:'French-style', tags:['food', 'classic']},
-  ];
-  
-  const ALL_ITEMS = [...BEVERAGES, ...PASTRIES];
+
   let cart = [];
   let cur = 'welcomeScreen';
 
@@ -51,16 +116,20 @@
   }
 
   function buildGrids() {
-    const bg = document.getElementById('beveragesGrid');
-    const pg = document.getElementById('pastryGrid');
-    BEVERAGES.forEach(i => bg.appendChild(makeCard(i)));
-    PASTRIES.forEach(i  => pg.appendChild(makeCard(i)));
+    ALL_ITEMS.forEach(item => {
+      const grid = document.getElementById(item.cat + 'Grid');
+      if (grid) {
+        grid.appendChild(makeCard(item));
+      }
+    });
   }
 
   function addItem(name, emoji, price, desc) {
     const ex = cart.find(i => i.name === name);
     ex ? ex.qty++ : cart.push({name, emoji, price, desc, qty:1});
     syncUI();
+    if (cur === 'cartScreen') renderCart(); 
+    
     showToast('Added: ' + name);
   }
 
@@ -287,15 +356,19 @@
     quizOptionsEl.innerHTML = ''; // Hide buttons
     quizResetBtn.classList.remove('hidden'); // Let them start over
 
-    // Filter the items based on the final tag
-    const recommendations = ALL_ITEMS.filter(item => item.tags.includes(finalTag));
+    // 1. Find all items that match the tag
+    const allMatches = ALL_ITEMS.filter(item => item.tags.includes(finalTag));
+    
+    // 2. Limit the results to a maximum of 3 items to keep the UI clean
+    const topRecommendations = allMatches.slice(0, 3);
     
     // Render Results
     recommendationContainer.innerHTML = '';
-    recommendations.forEach(item => {
-      recommendationContainer.appendChild(makeRecommendationCard(item)); // Re-uses your modal logic
+    topRecommendations.forEach(item => {
+      recommendationContainer.appendChild(makeRecommendationCard(item)); // Re-uses modal logic
     });
     
+    // 3. Reveal the section ONLY when results are ready
     resultsSection.classList.remove('hidden');
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }

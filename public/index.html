@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>BrewMate Kiosk — Responsive Ordering System</title>
+  <title>ChillVentory Kiosk — Responsive Ordering System</title>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -15,7 +15,7 @@
     <div class="welcome-logo" style="background: transparent; border: none; box-shadow: none;">
   <img src="chilltop.png" alt="Chilltop Logo" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
 </div>
-    <h1 class="welcome-title">BrewMate</h1>
+    <h1 class="welcome-title">ChillVentory</h1>
     <div class="welcome-sub">Self-Service Kiosk</div>
     <div class="welcome-divider"></div>
     <p class="welcome-tagline">Fresh brews, warm pastries — order your way, every day.</p>
@@ -28,7 +28,7 @@
   <nav class="top-nav">
     <button class="nav-back" id="menuBackBtn">←</button>
     <div class="nav-brand">
-      <div class="nav-brand-name">BrewMate</div>
+      <div class="nav-brand-name">ChillVentory</div>
       <div class="nav-brand-sub">craft coffee & bites</div>
     </div>
     <button class="nav-cart-btn" id="navCartBtn">
@@ -60,38 +60,61 @@
     <!-- Pills -->
     <div class="cat-row">
       <button class="cat-pill active" data-cat="all">All</button>
-      <button class="cat-pill" data-cat="coffee">☕ Beverages</button>
-      <button class="cat-pill" data-cat="pastry">🥐 Pastries</button>
+      <button class="cat-pill" data-cat="espresso">Espresso</button>
+      <button class="cat-pill" data-cat="noncoffee">Non-Coffee</button>
+      <button class="cat-pill" data-cat="milktea">Milk Tea</button>
+      <button class="cat-pill" data-cat="frappe">Frappe</button>
+      <button class="cat-pill" data-cat="fruittea">Fruit Tea</button>
+      <button class="cat-pill" data-cat="soda">Soda</button>
+      <button class="cat-pill" data-cat="croffle">Croffles</button>
+      <button class="cat-pill" data-cat="sandwiches">Sandwiches</button>
+      <button class="cat-pill" data-cat="snacks">Snacks</button>
     </div>
 
-    <!-- Featured -->
-    <div class="section-hd filterable-title" data-category="coffee">
+    <div class="section-hd filterable-title" data-category="espresso">
       <h3>🔥 Featured</h3><span class="badge">Best Seller</span>
     </div>
-    <div class="featured-card filterable-item" id="featCard" data-category="coffee"
-         data-name="Arabica Coffee" data-emoji="☕" data-price="145" data-desc="Premium house blend">
+    <div class="featured-card filterable-item" id="featCard" data-category="espresso"
+         data-name="Café Latte" data-emoji="☕" data-price="110" data-desc="Best selling 16oz">
       <div class="feat-emoji">☕</div>
       <div class="feat-info">
-        <div class="feat-name">Arabica Coffee</div>
-        <div class="feat-desc">Premium house blend</div>
-        <div class="feat-price">₱145</div>
+        <div class="feat-name">Café Latte</div>
+        <div class="feat-desc">Best selling 16oz</div>
+        <div class="feat-price">₱110</div>
       </div>
       <button class="add-btn" id="featAddBtn">+</button>
     </div>
 
-    <!-- Beverages -->
-    <div class="section-hd filterable-title" data-category="coffee">
-      <h3>☕ Beverages</h3><span class="badge">Hot & Cold</span>
-    </div>
-    <div class="items-grid filterable-item" data-category="coffee" id="beveragesGrid"></div>
+    <div class="section-hd filterable-title" data-category="espresso"><h3>☕ Espresso</h3></div>
+    <div class="items-grid filterable-item" data-category="espresso" id="espressoGrid"></div>
 
-    <!-- Pastries -->
-    <div class="section-hd filterable-title" data-category="pastry">
-      <h3>🥐 Fresh Pastries</h3><span class="badge">Bakery</span>
-    </div>
-    <div class="items-grid filterable-item" data-category="pastry" id="pastryGrid"></div>
+    <div class="section-hd filterable-title" data-category="espresso"><h3>☕ Espresso</h3></div>
+    <div class="items-grid filterable-item" data-category="espresso" id="espressoGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="noncoffee"><h3>🥛 Non-Coffee</h3></div>
+    <div class="items-grid filterable-item" data-category="noncoffee" id="noncoffeeGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="milktea"><h3>🧋 Milk Tea</h3></div>
+    <div class="items-grid filterable-item" data-category="milktea" id="milkteaGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="frappe"><h3>🥤 Frappe</h3></div>
+    <div class="items-grid filterable-item" data-category="frappe" id="frappeGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="fruittea"><h3>🍓 Fruit Tea</h3></div>
+    <div class="items-grid filterable-item" data-category="fruittea" id="fruitteaGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="soda"><h3>🫧 Soda</h3></div>
+    <div class="items-grid filterable-item" data-category="soda" id="sodaGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="croffle"><h3>🥐 Croffles</h3></div>
+    <div class="items-grid filterable-item" data-category="croffle" id="croffleGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="sandwiches"><h3>🥪 Sandwiches</h3></div>
+    <div class="items-grid filterable-item" data-category="sandwiches" id="sandwichesGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="snacks"><h3>🍟 Snacks</h3></div>
+    <div class="items-grid filterable-item" data-category="snacks" id="snacksGrid"></div>
   </div>
-  <!-- NO floating cart bar — Cart button in nav handles it on all screen sizes -->
 </div>
 
 <!-- ══ CART ══ -->
@@ -109,6 +132,15 @@
       <div id="cartItemsContainer"></div>
     </div>
     <div class="cart-sidebar">
+      <div class="notes-card" style="margin-bottom: 14px;">
+        <div class="notes-label">Extras & Add-ons</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+          <button class="cat-pill" onclick="addItem('+ Egg', '🍳', 20, 'Add-on')" style="font-size:12px; padding:6px 12px;">+ Egg (₱20)</button>
+          <button class="cat-pill" onclick="addItem('+ Cheese', '🧀', 15, 'Add-on')" style="font-size:12px; padding:6px 12px;">+ Cheese (₱15)</button>
+          <button class="cat-pill" onclick="addItem('+ Ham', '🥓', 20, 'Add-on')" style="font-size:12px; padding:6px 12px;">+ Ham (₱20)</button>
+          <button class="cat-pill" onclick="addItem('+ Beef', '🥩', 40, 'For Nachos')" style="font-size:12px; padding:6px 12px;">+ Beef (₱40)</button>
+        </div>
+      </div>
       <div class="notes-card">
         <div class="notes-label">Special instructions</div>
         <textarea id="orderNotes" rows="3" placeholder="e.g., Less ice, oat milk, extra shot…"></textarea>
@@ -135,7 +167,7 @@
   <div class="confirm-wrap">
     <div class="confirm-icon">✓</div>
     <h2 class="confirm-title">Order Placed!</h2>
-    <p class="confirm-sub">Sent to BrewMate POS</p>
+    <p class="confirm-sub">Sent to ChillVentory POS</p>
     <div class="queue-card">
       <div class="queue-label">Queue Number</div>
       <div class="queue-num" id="queueNum">—</div>
