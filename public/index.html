@@ -41,16 +41,12 @@
     <div class="hero-banner">
       <div class="hero-text">
         <small>☕ your virtual barista</small>
-        <h2 id="quiz-question">What's the vibe today?</h2>
-        
-        <div id="quiz-options" class="quiz-buttons" style="margin-top: 15px; display: flex; gap: 8px; flex-wrap: wrap; position: relative; z-index: 2;">
-          </div>
-        
-        <button id="quiz-reset" class="hidden" style="margin-top: 10px; background: none; border: none; color: rgba(255,255,255,0.7); font-size: 12px; cursor: pointer; text-decoration: underline; position: relative; z-index: 2;">Start over</button>
+        <h2>Not sure what to get?</h2>
+        <button id="open-quiz-btn" style="margin-top: 15px; background: white; color: var(--primary); border: none; padding: 12px 24px; border-radius: 50px; font-family: var(--sans); font-weight: 800; font-size: 14px; cursor: pointer; position: relative; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">Find my vibe ✨</button>
       </div>
     </div>
 
-    <div id="cravingResultsSection" class="hidden" style="margin-bottom: 24px;">
+    <div id="cravingResultsSection" class="hidden" style="margin-bottom: 8px;">
       <div class="section-hd">
         <h3>✨ Recommended for you</h3>
       </div>
@@ -71,7 +67,7 @@
       <button class="cat-pill" data-cat="snacks">Snacks</button>
     </div>
 
-    <div class="section-hd filterable-title" data-category="espresso">
+    <div id="featuredHeader" class="section-hd filterable-title" data-category="espresso">
       <h3>🔥 Featured</h3><span class="badge">Best Seller</span>
     </div>
     <div class="featured-card filterable-item" id="featCard" data-category="espresso"
@@ -132,15 +128,6 @@
       <div id="cartItemsContainer"></div>
     </div>
     <div class="cart-sidebar">
-      <div class="notes-card" style="margin-bottom: 14px;">
-        <div class="notes-label">Extras & Add-ons</div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-          <button class="cat-pill" onclick="addItem('+ Egg', '🍳', 20, 'Add-on')" style="font-size:12px; padding:6px 12px;">+ Egg (₱20)</button>
-          <button class="cat-pill" onclick="addItem('+ Cheese', '🧀', 15, 'Add-on')" style="font-size:12px; padding:6px 12px;">+ Cheese (₱15)</button>
-          <button class="cat-pill" onclick="addItem('+ Ham', '🥓', 20, 'Add-on')" style="font-size:12px; padding:6px 12px;">+ Ham (₱20)</button>
-          <button class="cat-pill" onclick="addItem('+ Beef', '🥩', 40, 'For Nachos')" style="font-size:12px; padding:6px 12px;">+ Beef (₱40)</button>
-        </div>
-      </div>
       <div class="notes-card">
         <div class="notes-label">Special instructions</div>
         <textarea id="orderNotes" rows="3" placeholder="e.g., Less ice, oat milk, extra shot…"></textarea>
@@ -158,6 +145,19 @@
         </div>
       </div>
       <button class="btn-place" id="placeOrderBtn" disabled>Place Order →</button>
+    </div>
+  </div>
+</div>
+
+<div id="quiz-modal-overlay" class="hidden">
+  <div class="quiz-modal-content">
+    <button id="close-quiz-btn" class="close-btn">&times;</button>
+    <div class="panel-section">
+        <div class="subtitle">☕ YOUR VIRTUAL BARISTA</div>
+        <h2 id="quiz-question" class="title">What's the vibe today?</h2>
+        <div id="quiz-options" class="button-group"></div>
+        <button id="quiz-reset" class="hidden" style="margin-top: 20px; background: none; border: none; color: rgba(255,255,255,0.7); font-size: 13px; font-family: var(--sans); cursor: pointer; text-decoration: underline; position: relative; z-index: 2;">Start over</button>
+        <div class="bg-graphic"></div>
     </div>
   </div>
 </div>
@@ -196,7 +196,16 @@
   <div class="modal-box">
     <div class="modal-emoji" id="modal-emoji">☕</div>
     <h3 id="modal-title">Item Name</h3>
-    <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px;">Description</p>
+    <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px; margin-bottom:16px;">Description</p>
+    
+    <div class="addon-section">
+      <div class="addon-label">Add-ons</div>
+      <div class="addon-options">
+        <button class="addon-btn active" data-addon="none" data-price="0">None</button>
+        <button class="addon-btn" data-addon="extra-milk" data-price="20">Extra Milk (+₱20)</button>
+      </div>
+    </div>
+
     <p class="modal-price">Total: <span id="modal-price-value" style="color:var(--primary); font-weight:800;">₱0</span></p>
     
     <div class="modal-actions">

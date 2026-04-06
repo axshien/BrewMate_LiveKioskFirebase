@@ -533,3 +533,70 @@
     .hidden {
   display: none !important;
 }
+
+/* ══════════════════════════════
+   VIBE QUIZ MODAL (NEW)
+══════════════════════════════ */
+#quiz-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(5px);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000; padding: 20px; opacity: 0; pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+#quiz-modal-overlay:not(.hidden) { opacity: 1; pointer-events: auto; }
+
+.quiz-modal-content {
+  background: linear-gradient(135deg, #9360d8, #a87df0);
+  width: 100%; max-width: 600px; border-radius: 24px;
+  position: relative; box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+  overflow: hidden; transform: translateY(20px);
+  transition: transform 0.3s ease;
+}
+#quiz-modal-overlay:not(.hidden) .quiz-modal-content { transform: translateY(0); }
+
+.close-btn {
+  position: absolute; top: 15px; right: 20px; background: none; border: none;
+  color: white; font-size: 28px; cursor: pointer; opacity: 0.7; z-index: 10;
+}
+.close-btn:hover { opacity: 1; }
+
+.quiz-modal-content .panel-section { padding: 40px 30px; color: white; position: relative; z-index: 2; }
+.quiz-modal-content .subtitle { font-size: 12px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; opacity: 0.9; }
+.quiz-modal-content .title { font-family: var(--serif); font-size: clamp(32px, 8vw, 42px); margin: 0 0 24px 0; font-weight: 700; line-height: 1.1; }
+.quiz-modal-content .button-group { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* Modal Button Overrides */
+.quiz-modal-content .craving-btn {
+  background: transparent; border: 1.5px solid rgba(255, 255, 255, 0.5);
+  color: white; padding: 12px 20px; border-radius: 50px; font-size: 14px;
+  font-weight: 600; cursor: pointer; transition: all 0.2s ease; backdrop-filter: none;
+}
+.quiz-modal-content .craving-btn:hover { background: rgba(255, 255, 255, 0.15); border-color: white; transform: scale(1.05); }
+
+/* Abstract Coffee Cup Graphic */
+.quiz-modal-content .bg-graphic {
+  position: absolute; right: -40px; top: 50%; transform: translateY(-50%);
+  width: 200px; height: 200px; border-radius: 50%;
+  border: 15px solid rgba(255, 255, 255, 0.05); z-index: 1; pointer-events: none;
+}
+.quiz-modal-content .bg-graphic::after {
+  content: ''; position: absolute; right: -30px; top: 50%;
+  width: 60px; height: 90px; border: 15px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0 100px 100px 0; transform: translateY(-50%);
+}
+
+/* ══════════════════════════════
+   MODAL ADD-ONS (NEW)
+══════════════════════════════ */
+.addon-section { text-align: left; margin-bottom: 20px; background: var(--bg); padding: 12px; border-radius: 16px; }
+.addon-label { font-size: 12px; font-weight: 800; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+.addon-options { display: flex; gap: 8px; flex-wrap: wrap; }
+.addon-btn {
+  flex: 1; padding: 12px 10px; border-radius: 12px; font-size: 13px; font-weight: 600;
+  background: white; border: 1.5px solid #ddd9ee; color: var(--text);
+  cursor: pointer; transition: all 0.2s; font-family: var(--sans);
+}
+.addon-btn.active {
+  background: var(--primary-bg); border-color: var(--primary); color: var(--primary);
+}

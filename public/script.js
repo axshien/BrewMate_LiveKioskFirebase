@@ -109,7 +109,7 @@
       <div class="item-desc">${item.desc}</div>
       <div class="item-price">₱${item.price}</div>
       <button class="add-btn">+</button>`;
-    const fn = () => addItem(item.name, item.emoji, item.price, item.desc);
+    const fn = () => triggerConfirmation(item);
     d.querySelector('.add-btn').addEventListener('click', e => { e.stopPropagation(); fn(); });
     d.addEventListener('click', fn);
     return d;
@@ -225,7 +225,7 @@
   document.getElementById('newOrderBtn').addEventListener('click',   newOrder);
 
   const fc   = document.getElementById('featCard');
-  const fcFn = () => addItem(fc.dataset.name, fc.dataset.emoji, +fc.dataset.price, fc.dataset.desc);
+  const fcFn = () => triggerConfirmation({name: fc.dataset.name, emoji: fc.dataset.emoji, price: +fc.dataset.price, desc: fc.dataset.desc});
   document.getElementById('featAddBtn').addEventListener('click', e => { e.stopPropagation(); fcFn(); });
   fc.addEventListener('click', fcFn);
 
@@ -248,6 +248,17 @@
   const confirmationOverlay = document.getElementById('confirmation-overlay');
   let itemPendingConfirmation = null;
 
+  const quizModalOverlay = document.getElementById('quiz-modal-overlay');
+  
+  document.getElementById('open-quiz-btn').addEventListener('click', () => {
+    quizModalOverlay.classList.remove('hidden');
+    loadQuizStep('start'); // Start fresh every time they open it
+  });
+
+  document.getElementById('close-quiz-btn').addEventListener('click', () => {
+    quizModalOverlay.classList.add('hidden');
+  });
+
   function makeRecommendationCard(item) {
     const d = document.createElement('div');
     d.className = 'item-card';
@@ -264,23 +275,55 @@
     return d;
   }
 
+  let currentAddonPrice = 0;
+  let currentAddonName = '';
+
   function triggerConfirmation(item) {
     itemPendingConfirmation = item;
     document.getElementById('modal-emoji').textContent = item.emoji;
     document.getElementById('modal-title').textContent = item.name;
     document.getElementById('modal-desc').textContent = item.desc;
+    
+    // Reset Add-ons every time modal opens
+    currentAddonPrice = 0;
+    currentAddonName = '';
+    document.querySelectorAll('.addon-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.addon-btn[data-addon="none"]').classList.add('active');
+
     document.getElementById('modal-price-value').textContent = '₱' + item.price;
     confirmationOverlay.classList.remove('hidden');
   }
+
+  // Handle Add-on UI toggling and price calculation
+  document.querySelectorAll('.addon-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      document.querySelectorAll('.addon-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      currentAddonPrice = parseInt(btn.dataset.price);
+      currentAddonName = btn.dataset.addon === 'none' ? '' : btn.textContent.split(' (')[0];
+
+      if (itemPendingConfirmation) {
+        const newTotal = itemPendingConfirmation.price + currentAddonPrice;
+        document.getElementById('modal-price-value').textContent = '₱' + newTotal;
+      }
+    });
+  });
 
   document.getElementById('btn-cancel-order').addEventListener('click', () => {
     confirmationOverlay.classList.add('hidden');
     itemPendingConfirmation = null;
   });
 
+  // Final push to cart
   document.getElementById('btn-confirm-order').addEventListener('click', () => {
     if (itemPendingConfirmation) {
-      addItem(itemPendingConfirmation.name, itemPendingConfirmation.emoji, itemPendingConfirmation.price, itemPendingConfirmation.desc);
+      let finalName = itemPendingConfirmation.name;
+      if (currentAddonName) finalName += ` (+ ${currentAddonName})`;
+      
+      let finalPrice = itemPendingConfirmation.price + currentAddonPrice;
+
+      addItem(finalName, itemPendingConfirmation.emoji, finalPrice, itemPendingConfirmation.desc);
       confirmationOverlay.classList.add('hidden');
       itemPendingConfirmation = null;
     }
@@ -322,15 +365,24 @@
   // Function to render a specific step in the quiz
   function loadQuizStep(stepKey) {
     const step = quizFlow[stepKey];
-    quizQuestionEl.textContent = step.question;
-    quizOptionsEl.innerHTML = ''; // Clear old buttons
+    const quizQuestionEl = document.getElementById('quiz-question'); 
+    const quizOptionsEl = document.getElementById('quiz-options'); 
     
-    // Show reset button if we aren't on the first step
+    quizQuestionEl.textContent = step.question;
+    quizOptionsEl.innerHTML = ''; 
+    
     if (stepKey === 'start') {
-      quizResetBtn.classList.add('hidden');
-      resultsSection.classList.add('hidden'); // Hide results if restarting
+      document.getElementById('quiz-reset').classList.add('hidden');
+      resultsSection.classList.add('hidden'); 
+      
+      // Bring back the Featured section when starting over
+      const featHeader = document.getElementById('featuredHeader');
+      const featCard = document.getElementById('featCard');
+      if (featHeader) featHeader.classList.remove('hidden');
+      if (featCard) featCard.classList.remove('hidden');
+      
     } else {
-      quizResetBtn.classList.remove('hidden');
+      document.getElementById('quiz-reset').classList.remove('hidden');
     }
 
     // Generate the new buttons
@@ -355,25 +407,27 @@
 
   // Function to show the final recommended items
   function showQuizResults(finalTag) {
-    quizQuestionEl.textContent = "Here is what we recommend!";
-    quizOptionsEl.innerHTML = ''; // Hide buttons
-    quizResetBtn.classList.remove('hidden'); // Let them start over
-
-    // 1. Find all items that match the tag
     const allMatches = ALL_ITEMS.filter(item => item.tags.includes(finalTag));
-    
-    // 2. Limit the results to a maximum of 3 items to keep the UI clean
     const topRecommendations = allMatches.slice(0, 3);
     
-    // Render Results
     recommendationContainer.innerHTML = '';
     topRecommendations.forEach(item => {
-      recommendationContainer.appendChild(makeRecommendationCard(item)); // Re-uses modal logic
+      recommendationContainer.appendChild(makeRecommendationCard(item)); 
     });
     
-    // 3. Reveal the section ONLY when results are ready
     resultsSection.classList.remove('hidden');
+    
+    // Hide the Featured section so recommendations stand out
+    document.getElementById('featuredHeader').classList.add('hidden');
+    document.getElementById('featCard').classList.add('hidden');
+
+    // Make the scroll seamless and gentle
     resultsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    
+    // Add a tiny delay to the fade out so the layout shift happens invisibly
+    setTimeout(() => {
+      quizModalOverlay.classList.add('hidden');
+    }, 50);
   }
 
   // Allow user to reset the quiz
