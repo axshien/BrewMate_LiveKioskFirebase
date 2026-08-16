@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>ChillVentory Kiosk — Responsive Ordering System</title>
+  <title>ChillVentoryx Kiosk — Responsive Ordering System</title>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=997">
 </head>
 <body>
 
@@ -15,7 +15,7 @@
     <div class="welcome-logo" style="background: transparent; border: none; box-shadow: none;">
   <img src="chilltop.png" alt="Chilltop Logo" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">
 </div>
-    <h1 class="welcome-title">ChillVentory</h1>
+    <h1 class="welcome-title">ChillVentoryx</h1>
     <div class="welcome-sub">Self-Service Kiosk</div>
     <div class="welcome-divider"></div>
     <p class="welcome-tagline">Fresh brews, warm pastries — order your way, every day.</p>
@@ -28,61 +28,66 @@
   <nav class="top-nav">
     <button class="nav-back" id="menuBackBtn">←</button>
     <div class="nav-brand">
-      <div class="nav-brand-name">ChillVentory</div>
-      <div class="nav-brand-sub">craft coffee & bites</div>
+      <div class="nav-brand-name">ChillVentoryx</div>
+      <div class="nav-brand-sub">Main - Menu</div>
     </div>
     <button class="nav-cart-btn" id="navCartBtn">
       🛒 Cart <span class="nav-cart-badge" id="navCartBadge">0</span>
     </button>
   </nav>
+ <div class="menu-body">
 
-  <div class="menu-body">
     <!-- Hero Recommendation -->
-    <div class="hero-banner">
-      <div class="hero-text">
-        <small>☕ your virtual barista</small>
-        <h2>Not sure what to get?</h2>
-        <button id="open-quiz-btn" style="margin-top: 15px; background: white; color: var(--primary); border: none; padding: 12px 24px; border-radius: 50px; font-family: var(--sans); font-weight: 800; font-size: 14px; cursor: pointer; position: relative; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">Find my vibe ✨</button>
+    <div class="hero-grid">
+      <div class="hero-banner" id="quizBannerCard" style="margin-bottom: 0;">
+        <div class="hero-text">
+          <small>☕ your virtual barista</small>
+          <h2>Not sure what to get?</h2>
+          <button style="pointer-events: none; margin-top: 15px; background: white; color: var(--primary); border: none; padding: 12px 24px; border-radius: 50px; font-family: var(--sans); font-weight: 800; font-size: 14px; position: relative; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">Find my vibe ✨</button>
+        </div>
       </div>
-    </div>
-
-    <div id="cravingResultsSection" class="hidden" style="margin-bottom: 8px;">
-      <div class="section-hd">
-        <h3>✨ Recommended for you</h3>
-      </div>
-      <div class="items-grid" id="recommendationContainer"></div>
+      
+      <div class="promo-slideshow" id="promoSlideshow">
+        </div>
     </div>
 
     <!-- Pills -->
-    <div class="cat-row">
-      <button class="cat-pill active" data-cat="all">All</button>
-      <button class="cat-pill" data-cat="espresso">Espresso</button>
-      <button class="cat-pill" data-cat="noncoffee">Non-Coffee</button>
-      <button class="cat-pill" data-cat="milktea">Milk Tea</button>
-      <button class="cat-pill" data-cat="frappe">Frappe</button>
-      <button class="cat-pill" data-cat="fruittea">Fruit Tea</button>
-      <button class="cat-pill" data-cat="soda">Soda</button>
-      <button class="cat-pill" data-cat="croffle">Croffles</button>
-      <button class="cat-pill" data-cat="sandwiches">Sandwiches</button>
-      <button class="cat-pill" data-cat="snacks">Snacks</button>
+    <div class="search-container">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="menuSearch" placeholder="Search menu, categories, or tags..." autocomplete="off">
     </div>
 
-    <div id="featuredHeader" class="section-hd filterable-title" data-category="espresso">
+    <div class="cat-row" id="categoryContainer">
+      <button class="cat-pill active" data-cat="all">All</button>
+    </div>
+
+    <div id="searchResultsContainer" class="hidden">
+      <div class="section-hd"><h3>🔎 Search Results</h3></div>
+      <div id="searchResultsGrid" class="items-grid"></div>
+      <div id="noResultsMsg" class="empty-state hidden">
+        <div class="empty-icon">🧐</div>
+        <p>Item doesn't exist</p>
+      </div>
+    </div>
+    <div id="featuredHeader" class="section-hd filterable-title" data-category="espresso" style="margin-top: 16px;">
       <h3>🔥 Featured</h3><span class="badge">Best Seller</span>
     </div>
     <div class="featured-card filterable-item" id="featCard" data-category="espresso"
-         data-name="Café Latte" data-emoji="☕" data-price="110" data-desc="Best selling 16oz">
-      <div class="feat-emoji">☕</div>
-      <div class="feat-info">
-        <div class="feat-name">Café Latte</div>
-        <div class="feat-desc">Best selling 16oz</div>
-        <div class="feat-price">₱110</div>
-      </div>
-      <button class="add-btn" id="featAddBtn">+</button>
+         data-name="Café Latte" data-emoji="☕" data-price="110" data-desc="Best Selling Café"
+         data-recipe="Espresso Shot, Steamed Milk, Light Milk Foam" data-uid="1000101" data-cal="150"
+         style="position: relative; flex-direction: column; align-items: stretch; gap: 0;">      
+      <div class="promo-badge b1t1">B1T1</div>
+      <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 12px;">
+        <div class="feat-emoji">☕</div>
+        <div class="feat-info">
+          <div class="feat-name">Café Latte</div>
+          <div class="feat-desc">Best Selling Café</div>
+          <div class="feat-price">₱110</div>
+        </div>
+        <button class="add-btn" id="featAddBtn">+</button>
+      </div>     
+      <div class="promo-banner" style="margin: 0 -16px -16px -16px; background: #e0f2eb;">🎁 Buy 1 Get 1 Free - 16oz included</div>
     </div>
-
-    <div class="section-hd filterable-title" data-category="espresso"><h3>☕ Espresso</h3></div>
-    <div class="items-grid filterable-item" data-category="espresso" id="espressoGrid"></div>
 
     <div class="section-hd filterable-title" data-category="espresso"><h3>☕ Espresso</h3></div>
     <div class="items-grid filterable-item" data-category="espresso" id="espressoGrid"></div>
@@ -122,17 +127,33 @@
       <div class="nav-brand-sub">Review & place</div>
     </div>
   </nav>
+  
   <div class="cart-body">
     <div class="cart-items-col">
       <h2>Order Items</h2>
       <div id="cartItemsContainer"></div>
     </div>
+    
     <div class="cart-sidebar">
+      <div class="notes-card" style="margin-bottom: 14px;">
+        <div class="notes-label">Nickname for Cup <span style="color: #e74c3c;">*</span></div>
+        <input type="text" id="customerNickname" class="nickname-input" placeholder="Enter name (required)" autocomplete="off" maxlength="15" oninput="checkOrderValidation()" />
+      </div>
+
+      <div class="notes-card" style="margin-bottom: 14px;">
+        <div class="notes-label">Order Type</div>
+        <div class="addon-options">
+          <button class="addon-btn order-type-btn active" data-type="Dine In">🍽️ Dine In</button>
+          <button class="addon-btn order-type-btn" data-type="Take Out">🛍️ Take Out</button>
+        </div>
+      </div>
+
       <div class="notes-card">
         <div class="notes-label">Special instructions</div>
-        <textarea id="orderNotes" rows="3" placeholder="e.g., Less ice, oat milk, extra shot…"></textarea>
+        <textarea id="orderNotes" rows="3" placeholder="e.g. Less ice, oat milk, extra shot"></textarea>
       </div>
-      <div class="summary-card">
+
+      <div class="summary-card" style="margin-top: 14px;">
         <h3>Order Summary</h3>
         <div class="sum-row">
           <span style="color:var(--muted);font-size:13px;">Subtotal</span>
@@ -144,6 +165,37 @@
           <strong class="sum-total" id="cartTotal">₱0</strong>
         </div>
       </div>
+
+      <div class="notes-card" style="margin-top: 14px; margin-bottom: 14px;">
+  <div class="notes-label">Payment Method</div>
+  <div class="payment-options">
+    <label class="pay-radio">
+      <input type="radio" name="payment" value="Cash" checked>
+      <span class="pay-custom"></span>
+      💵 Cash
+    </label>
+    <label class="pay-radio">
+      <input type="radio" name="payment" value="E-Wallets">
+      <span class="pay-custom"></span>
+      📱 E-Wallets
+    </label>
+  </div>
+
+  <div id="panel-cash" class="pay-panel">
+    <p>Please pay at the cashier upfront to process your order.</p>
+    <p style="margin-top: 8px; font-size: 11px; color: #e74c3c; font-weight: 700;">* Discount IDs should be shown over the counter for validation</p>
+  </div>
+  
+  <div id="panel-digital" class="pay-panel hidden">
+    <select id="ewalletSelect" class="ewallet-dropdown">
+      <option value="GCash">GCash</option>
+      <option value="PayPal">PayPal</option>
+    </select>
+    <div class="spinner"></div>
+    <p>Placeholder active. Awaiting PayMongo integration.</p>
+  </div>
+</div>
+
       <button class="btn-place" id="placeOrderBtn" disabled>Place Order →</button>
     </div>
   </div>
@@ -152,6 +204,7 @@
 <div id="quiz-modal-overlay" class="hidden">
   <div class="quiz-modal-content">
     <button id="close-quiz-btn" class="close-btn">&times;</button>
+    
     <div class="panel-section">
         <div class="subtitle">☕ YOUR VIRTUAL BARISTA</div>
         <h2 id="quiz-question" class="title">What's the vibe today?</h2>
@@ -159,6 +212,12 @@
         <button id="quiz-reset" class="hidden" style="margin-top: 20px; background: none; border: none; color: rgba(255,255,255,0.7); font-size: 13px; font-family: var(--sans); cursor: pointer; text-decoration: underline; position: relative; z-index: 2;">Start over</button>
         <div class="bg-graphic"></div>
     </div>
+
+    <div id="cravingResultsSection" class="hidden" style="background: var(--bg); padding: 30px; border-radius: 0 0 24px 24px;">
+      <h3 style="font-family: var(--serif); font-size: 20px; color: var(--text); margin-bottom: 16px;">We recommend...</h3>
+      <div id="recommendationContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;"></div>
+    </div>
+
   </div>
 </div>
 
@@ -168,36 +227,87 @@
     <div class="confirm-icon">✓</div>
     <h2 class="confirm-title">Order Placed!</h2>
     <p class="confirm-sub">Sent to ChillVentory POS</p>
+    
     <div class="queue-card">
       <div class="queue-label">Queue Number</div>
       <div class="queue-num" id="queueNum">—</div>
     </div>
+    
     <div class="confirm-details">
       <div class="cd-row">
-        <span style="font-size:13px;color:var(--muted);">Items</span>
-        <strong id="confirmItems">—</strong>
+        <span style="font-size:13px;color:var(--muted);">Invoice</span>
+        <strong id="confirmInvoice" style="color:var(--text);font-size:14px;">—</strong>
       </div>
       <div class="cd-row">
-        <span style="font-size:13px;color:var(--muted);">Amount</span>
+        <span style="font-size:13px;color:var(--muted);">Date</span>
+        <strong id="confirmDate" style="color:var(--text);font-size:14px;">—</strong>
+      </div>
+      <div class="cd-row" style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #e2dff0;">
+        <span style="font-size:13px;color:var(--muted);">Time</span>
+        <strong id="confirmTime" style="color:var(--text);font-size:14px;">—</strong>
+      </div>
+      <div class="cd-row">
+        <span style="font-size:13px;color:var(--muted);">Name</span>
+        <strong id="confirmNickname" style="color:var(--text);font-size:14px;">Guest</strong>
+      </div>
+      <div style="display: flex; flex-direction: column; margin-top: 10px;">
+        <div class="cd-row" style="margin-top: 0;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size:13px;color:var(--muted);">Items</span>
+            <button id="btn-show-items" style="background: none; border: none; color: var(--primary); font-size: 11px; font-weight: 800; cursor: pointer; text-decoration: underline; padding: 0;">Show</button>
+          </div>
+          <strong id="confirmItems">—</strong>
+        </div>
+        <div id="confirm-items-list" class="hidden" style="margin-top: 8px; padding: 12px; background: #f8f7fb; border-radius: 8px; font-size: 12px; color: var(--text);">
+          </div>
+      </div>
+      <div class="cd-row">
+        <span style="font-size:13px;color:var(--muted);">Order Type</span>
+        <strong id="confirmOrderType">Dine In</strong>
+      </div>
+      <div class="cd-row">
+        <span style="font-size:13px;color:var(--muted);">Amount Due</span>
         <strong style="color:var(--primary);font-size:16px;" id="confirmAmount">₱0</strong>
       </div>
-      <div class="cd-row">
+      <div class="cd-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2dff0;">
         <span style="font-size:13px;color:var(--muted);">Status</span>
-        <span class="cd-status">✓ Sent to admin</span>
+        <span class="cd-status">✓ Sent to POS</span>
       </div>
     </div>
+    <button class="btn-place" id="viewReceiptBtn" style="margin-bottom: 12px; background: var(--text);">📄 View Digital Receipt</button>
     <button class="btn-outline" id="newOrderBtn">Place another order</button>
   </div>
 </div>
 
 <!-- ══ Recommendation ══ -->
-
 <div id="confirmation-overlay" class="hidden">
   <div class="modal-box">
+    <div id="modal-uid" style="font-size: 11px; font-weight: 800; color: var(--muted); margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase;">UID: —</div>
+    
     <div class="modal-emoji" id="modal-emoji">☕</div>
     <h3 id="modal-title">Item Name</h3>
-    <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px; margin-bottom:16px;">Description</p>
+    <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px; margin-bottom:8px;">Description</p>
     
+    <button id="btn-toggle-recipe" style="background: none; border: none; color: var(--primary); font-size: 12px; font-weight: 700; cursor: pointer; text-decoration: underline; margin-bottom: 16px;">View Ingredients</button>
+    <div id="modal-recipe-content" class="hidden" style="background: var(--bg); padding: 10px; border-radius: 8px; font-size: 12px; color: var(--text); margin-bottom: 16px; text-align: left;">
+      <div style="display:flex; align-items:center; margin-bottom:4px; gap:6px;">
+        <strong style="display:block;">Contains:</strong>
+        <div class="tooltip-container">
+          <span class="info-icon">ⓘ</span>
+          <div class="tooltip-text" id="modal-calories-text">Est. 0 kcal</div>
+        </div>
+      </div>
+      <span id="modal-recipe-text">Espresso, Steamed Milk, Vanilla Syrup</span>
+    </div>
+    
+    <div class="size-section" id="modal-size-section">
+      <div class="addon-label">Size</div>
+      <div class="addon-options">
+        <button class="size-btn active" data-size="16oz">16oz (Standard)</button>
+        <button class="size-btn" data-size="22oz" id="btn-upsize">22oz</button>
+      </div>
+    </div>
+
     <div class="addon-section">
       <div class="addon-label">Add-ons</div>
       <div class="addon-options">
@@ -206,17 +316,47 @@
       </div>
     </div>
 
-    <p class="modal-price">Total: <span id="modal-price-value" style="color:var(--primary); font-weight:800;">₱0</span></p>
+    <div id="modal-promo-section" class="b1t1-container hidden" style="background: #FDEDED; border-color: #FADBD8;">
+      <div style="font-size: 13px; color: #C0392B; font-weight: 700;">🏷️ Claim 20% Promotional Discount</div>
+      <label class="switch">
+        <input type="checkbox" id="promo-opt-in">
+        <span class="slider slider-red"></span>
+      </label>
+    </div>
+
+    <div id="modal-b1t1-section" class="b1t1-container hidden">
+      <div style="font-size: 13px; color: #1CA673; font-weight: 700;">🎁 Claim Buy 1 Take 1 Offer</div>
+      <label class="switch">
+        <input type="checkbox" id="b1t1-opt-in">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <p class="modal-price" style="display: block; width: 100%; text-align: center;">
+      Total: <span id="modal-price-value" style="color:var(--primary); font-weight:800;">₱0</span>
+    </p>
     
-    <div class="modal-actions">
-      <button id="btn-cancel-order" class="btn-outline" style="margin: 0; border: 1.5px solid #ddd9ee; color: var(--text);">Go Back</button>
-      <button id="btn-confirm-order" class="btn-place" style="margin-top: 0; padding: 14px;">Add to Order</button>
+    <div class="modal-actions" style="margin-top: 16px; width: 100%; display: block;">
+      <button id="btn-confirm-order" class="btn-place" style="margin-top: 0; padding: 14px; width: 100%;">Add to Order</button>
     </div>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div id="receipt-overlay" class="hidden">
+  <div class="receipt-wrapper">
+    <div class="receipt-paper" id="receipt-paper">
+      </div>
+    <button id="btn-download-pdf" class="btn-place" style="margin-top: 24px; background: #333; box-shadow: 0 8px 20px rgba(0,0,0,0.2);">
+      ⬇ Download as PDF
+    </button>
+  </div>
+</div>
 
-<script src="script.js"></script>
+<div class="toast" id="toast"></div>
+<div class="peciller-watermark">(Peciller™ build v1.0 xD)</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="script.js?v=911"></script>
 </body>
 </html>
