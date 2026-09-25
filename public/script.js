@@ -6,6 +6,8 @@ let ALL_PRODUCT_ADDONS = [];
 let ALL_RECIPES = [];
 let ALL_INGREDIENTS = [];
 let ALL_ADDON_RECIPES = {};
+let ALL_PROMOTIONS = [];        // Active promotions from chill_promotion
+let PROMO_PRODUCT_IDS = {};    // Map: productId -> promotion object
 let TOP_SELLING_PRODUCT = null;
 let cart = [];
 
@@ -17,96 +19,309 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-// Contextual emoji helper for items
-function getItemEmoji(item) {
-  if (item && item.emoji) return item.emoji;
-  const name = (item && (item.productName || item.name) || '').toLowerCase();
-  const cat = Number(item && item.categoryId || 0);
-
-  if (name.includes('matcha')) return '🍵';
-  if (name.includes('fries')) return '🍟';
-  if (name.includes('nacho') || name.includes('cheese stick')) return '🧀';
-  if (name.includes('poppers') || name.includes('chix') || name.includes('chicken')) return '🍗';
-  if (name.includes('burger') || name.includes('sandwich')) return '🥪';
-  if (name.includes('waffle') || name.includes('croffle')) return '🧇';
-  if (name.includes('spaghetti') || name.includes('pasta') || name.includes('carbonara')) return '🍝';
-  if (name.includes('silog') || name.includes('tocino') || name.includes('tapa') || name.includes('liempo') || name.includes('porkchop') || name.includes('spam') || name.includes('hotsilog') || name.includes('hungarian')) return '🍳';
-  if (name.includes('tea') && !name.includes('fruit')) return '🧋';
-  if (name.includes('fruit') || name.includes('lemon') || name.includes('passion') || name.includes('berry') || name.includes('mango') || name.includes('lychee') || name.includes('peach') || name.includes('strawberry')) return '🍓';
-  if (name.includes('soda') || name.includes('fizz')) return '🫧';
-  if (name.includes('frappe')) return '🥤';
-  if (name.includes('milk')) return '🥛';
-  if (cat === 1 || cat === 2) return '☕';
-  if (cat === 4) return '🥛';
-  if (cat === 5) return '🥤';
-  if (cat === 6) return '🍓';
-  if (cat === 7) return '🫧';
-  if (cat === 8) return '🍵';
-  if (cat === 9) return '🧋';
-  if (cat === 10) return '🧇';
-  if (cat === 11) return '🥪';
-  if (cat === 12) return '🍟';
-  if (cat === 13) return '🍳';
-  if (cat === 15) return '🍝';
-  return '☕';
+// Product image helper using Supabase imageUrl with reliable fallbacks
+function getProductImage(item) {
+  if (item && item.imageUrl && typeof item.imageUrl === 'string' && item.imageUrl.trim() !== '') {
+    const url = item.imageUrl.trim();
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
+      return url;
+    }
+    if (url.startsWith('/storage/') || url.startsWith('storage/')) {
+      return `${SUPABASE_URL}/${url.replace(/^\//, '')}`;
+    }
+    if (url.startsWith('/data/') || url.startsWith('/storage/emulated/') || url.startsWith('file://')) {
+      return 'placeholder.svg';
+    }
+    return url;
+  }
+  return 'placeholder.svg';
 }
 
-// Helper to determine ingredients for each product
-function getProductIngredients(productId, productName, categoryId, productRecipeMap) {
-  // 1. Database-backed chill_recipe ingredients (connected to chill_ingredient)
-  if (productRecipeMap[productId] && productRecipeMap[productId].length > 0) {
-    return productRecipeMap[productId].join(', ');
+// ─── PROMOTION HELPERS ────────────────────────────────────────────────────────
+// Build PROMO_PRODUCT_IDS from fetched promotion data
+function buildPromoMap(promotions, promoProducts) {
+  PROMO_PRODUCT_IDS = {};
+  const now = new Date();
+
+  promotions.forEach(promo => {
+    if (!promo.isActive) return;
+    // Check date range
+    if (promo.startDate && new Date(promo.startDate) > now) return;
+    if (promo.endDate && new Date(promo.endDate) < now) return;
+
+    promoProducts.forEach(pp => {
+      if (Number(pp.promotionid) !== Number(promo.promotionId)) return;
+      if (!pp.enabled) return;
+      const pId = Number(pp.productid);
+      // Keep the best (highest) discount if multiple promos apply
+      const existing = PROMO_PRODUCT_IDS[pId];
+      const discountPct = promo.discountType === 1 ? Number(promo.discountValue) : 0; // type 1 = percentage
+      const discountFlat = promo.discountType === 2 ? Number(promo.discountValue) : 0; // type 2 = fixed
+      if (!existing || discountPct > (existing.discountPct || 0) || discountFlat > (existing.discountFlat || 0)) {
+        PROMO_PRODUCT_IDS[pId] = {
+          promotionId: promo.promotionId,
+          promotionName: promo.promotionName,
+          discountType: promo.discountType,    // 1=pct, 2=fixed
+          discountValue: Number(promo.discountValue),
+          discountPct,
+          discountFlat
+        };
+      }
+    });
+  });
+}
+
+// Compute discounted price for a given base price
+function applyPromo(basePrice, promo) {
+  if (!promo) return basePrice;
+  if (promo.discountType === 1) {
+    // Percentage discount
+    return Math.max(0, Math.round((basePrice * (1 - promo.discountValue / 100)) * 100) / 100);
+  } else if (promo.discountType === 2) {
+    // Fixed amount discount
+    return Math.max(0, basePrice - promo.discountValue);
+  }
+  return basePrice;
+}
+
+// Apply promotion data to a product item object (mutates item)
+function applyPromoToItem(item) {
+  const promo = PROMO_PRODUCT_IDS[Number(item.productId)];
+  item.promo = promo || null;
+  if (promo) {
+    item.promoPrice = applyPromo(item.price, promo);
+    item.promoMinPrice = applyPromo(item.minPrice, promo);
+    item.promoMaxPrice = applyPromo(item.maxPrice, promo);
+  } else {
+    item.promoPrice = null;
+    item.promoMinPrice = null;
+    item.promoMaxPrice = null;
+  }
+}
+
+// Global tracking of out of stock ingredients & map
+let OOS_INGREDIENT_IDS = new Set();
+let OOS_INGREDIENT_MAP = {};
+
+// Helper to determine out-of-stock status strictly based on database chill_recipe & chill_ingredient
+function checkProductStockStatus(product, recipeMap, oosIngIds, oosIngMap, allIngredients) {
+  const pId = product.productId;
+  const ingIds = (recipeMap && (recipeMap[pId] || recipeMap[Number(pId)] || recipeMap[String(pId)])) || [];
+
+  // Exact database connection: chill_recipe -> chill_ingredient
+  if (ingIds.length > 0) {
+    for (const rawIngId of ingIds) {
+      const ingId = Number(rawIngId);
+      if (oosIngIds.has(ingId) || oosIngIds.has(rawIngId)) {
+        const ing = (oosIngMap && (oosIngMap[ingId] || oosIngMap[rawIngId])) || 
+                    (allIngredients && allIngredients.find(i => Number(i.ingredientId) === ingId));
+        return {
+          isOutOfStock: true,
+          reason: `${ing ? ing.ingredientName : 'Required ingredient'} is out of stock`
+        };
+      }
+    }
   }
 
-  // 2. Realistic recipe ingredients based on product name & category
-  const name = (productName || '').toLowerCase();
-  const cat = Number(categoryId || 0);
+  return { isOutOfStock: false, reason: '' };
+}
 
-  if (name.includes('americano')) {
-    return name.includes('iced') ? 'Espresso, Cold Water, Ice' : 'Espresso, Hot Water';
+// Helper to get exact recipe from database (chill_recipe connected to chill_ingredient)
+// Strictly database-driven: does NOT make up any ingredients.
+function getProductIngredients(productId, productRecipeMap) {
+  if (productRecipeMap) {
+    const list = productRecipeMap[productId] || productRecipeMap[Number(productId)] || productRecipeMap[String(productId)];
+    if (list && list.length > 0) {
+      return list.join(', ');
+    }
   }
-  if (name.includes('spanish')) return 'Espresso, Condensed Milk, Fresh Milk, Ice';
-  if (name.includes('latte')) {
-    if (name.includes('vanilla')) return 'Espresso, Steamed Milk, Vanilla Syrup';
-    if (name.includes('caramel')) return 'Espresso, Steamed Milk, Caramel Sauce';
-    if (name.includes('hazelnut')) return 'Espresso, Steamed Milk, Hazelnut Syrup';
-    if (name.includes('matcha')) return 'Matcha Powder, Steamed Milk, Vanilla';
-    return name.includes('iced') ? 'Espresso, Fresh Milk, Ice' : 'Espresso, Steamed Milk';
+  return '';
+}
+
+// Update card UI in-place when stock becomes available or out of stock
+function updateCardStockUI(item) {
+  const cards = document.querySelectorAll(`[data-product-id="${item.productId}"]`);
+  cards.forEach(card => {
+    const isOOS = !!item.isOutOfStock;
+    card.classList.toggle('out-of-stock', isOOS);
+
+    const imgWrap = card.querySelector('.item-img-wrap');
+    let badge = imgWrap ? imgWrap.querySelector('.stock-badge-oos') : null;
+    if (isOOS) {
+      if (!badge && imgWrap) {
+        badge = document.createElement('span');
+        badge.className = 'stock-badge-oos';
+        badge.textContent = 'Out of Stock';
+        imgWrap.prepend(badge);
+      }
+    } else {
+      if (badge) badge.remove();
+    }
+
+    // Dynamic recipe display on card
+    let recipeEl = card.querySelector('.item-recipe');
+    if (item.recipe) {
+      if (!recipeEl) {
+        recipeEl = document.createElement('div');
+        recipeEl.className = 'item-recipe';
+        const spacer = card.querySelector('.card-spacer');
+        if (spacer && spacer.parentNode) {
+          spacer.parentNode.insertBefore(recipeEl, spacer);
+        } else {
+          card.appendChild(recipeEl);
+        }
+      }
+      recipeEl.innerHTML = `<strong>Ingredients:</strong> ${item.recipe}`;
+    } else if (recipeEl) {
+      recipeEl.remove();
+    }
+
+    const addBtn = card.querySelector('.add-btn');
+    if (addBtn) {
+      if (isOOS) {
+        addBtn.disabled = true;
+        addBtn.classList.add('disabled');
+        addBtn.textContent = '✕';
+        addBtn.setAttribute('aria-label', 'Out of stock');
+      } else {
+        addBtn.disabled = false;
+        addBtn.classList.remove('disabled');
+        addBtn.textContent = '+';
+        addBtn.setAttribute('aria-label', `Add ${item.productName || item.name}`);
+      }
+    }
+  });
+}
+
+// Dynamic stock synchronization with Supabase
+async function refreshInventoryStock() {
+  if (!db || !ALL_ITEMS.length) return;
+  try {
+    const [recsRes, ingsRes] = await Promise.all([
+      db.from('chill_recipe').select('*'),
+      db.from('chill_ingredient').select('*')
+    ]);
+
+    const recipesList = recsRes.data || ALL_RECIPES;
+    const ingredientsList = ingsRes.data || ALL_INGREDIENTS;
+
+    ALL_RECIPES = recipesList;
+    ALL_INGREDIENTS = ingredientsList;
+
+    const ingredientLookup = {};
+    const oosIds = new Set();
+    const oosMap = {};
+
+    ingredientsList.forEach(ing => {
+      ingredientLookup[ing.ingredientId] = ing.ingredientName;
+      const stock = (ing.currentStock !== null && ing.currentStock !== undefined) ? Number(ing.currentStock) : null;
+      const status = (ing.status !== null && ing.status !== undefined) ? String(ing.status).trim() : null;
+      const isOOS = (stock !== null && !isNaN(stock) && stock <= 0) ||
+                    status === '0' ||
+                    status === 'out_of_stock' ||
+                    status === 'Out of Stock' ||
+                    status === 'inactive';
+      if (isOOS) {
+        oosIds.add(ing.ingredientId);
+        oosMap[ing.ingredientId] = ing;
+      }
+    });
+
+    OOS_INGREDIENT_IDS = oosIds;
+    OOS_INGREDIENT_MAP = oosMap;
+
+    const productRecipeMap = {};
+    const productRecipeIdsMap = {};
+    recipesList.forEach(r => {
+      const pId = r.productId;
+      const numPId = Number(r.productId);
+      const ingId = Number(r.ingredientId);
+
+      if (!productRecipeMap[pId]) productRecipeMap[pId] = [];
+      if (!productRecipeMap[numPId]) productRecipeMap[numPId] = productRecipeMap[pId];
+      if (!productRecipeIdsMap[pId]) productRecipeIdsMap[pId] = [];
+      if (!productRecipeIdsMap[numPId]) productRecipeIdsMap[numPId] = productRecipeIdsMap[pId];
+
+      if (!productRecipeIdsMap[pId].includes(ingId)) {
+        productRecipeIdsMap[pId].push(ingId);
+      }
+      const ingName = ingredientLookup[r.ingredientId] || ingredientLookup[ingId];
+      if (ingName && !productRecipeMap[pId].includes(ingName)) {
+        productRecipeMap[pId].push(ingName);
+      }
+    });
+
+    ALL_ITEMS.forEach(item => {
+      const dbIngredients = productRecipeMap[item.productId] || productRecipeMap[Number(item.productId)] || [];
+      item.recipe = dbIngredients.length > 0 ? dbIngredients.join(', ') : '';
+      item.ingredients = dbIngredients;
+
+      const stockStatus = checkProductStockStatus(item, productRecipeIdsMap, oosIds, oosMap, ingredientsList);
+      item.isOutOfStock = stockStatus.isOutOfStock;
+      item.outOfStockReason = stockStatus.reason;
+
+      updateCardStockUI(item);
+    });
+
+    // Update Top Selling product card
+    if (TOP_SELLING_PRODUCT) {
+      const updatedTop = ALL_ITEMS.find(i => i.productId === TOP_SELLING_PRODUCT.productId);
+      if (updatedTop) {
+        TOP_SELLING_PRODUCT = updatedTop;
+        renderTopSellingCard(TOP_SELLING_PRODUCT);
+      }
+    }
+
+    // Update product modal if open
+    if (itemPendingConfirmation) {
+      const updatedPending = ALL_ITEMS.find(i => i.productId === itemPendingConfirmation.productId);
+      if (updatedPending) {
+        itemPendingConfirmation = updatedPending;
+        const confirmBtn = document.getElementById('btn-confirm-order');
+        if (confirmBtn) {
+          if (itemPendingConfirmation.isOutOfStock) {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Out of Stock';
+            confirmBtn.classList.add('disabled');
+          } else {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Add to Order';
+            confirmBtn.classList.remove('disabled');
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Stock sync check failed:", err);
   }
-  if (name.includes('cappuccino')) return 'Espresso, Steamed Milk, Milk Foam';
-  if (name.includes('mocha')) return 'Espresso, Dark Chocolate Sauce, Fresh Milk';
-  if (name.includes('matcha')) return 'Matcha Powder, Fresh Milk, Vanilla';
-  if (name.includes('chocolate')) return 'Chocolate Syrup, Fresh Milk, Whipped Cream';
-  if (name.includes('milk tea')) return 'Brewed Black Tea, Fresh Milk, Tapioca Pearls, Brown Sugar';
-  if (name.includes('fruit tea')) {
-    if (name.includes('passion')) return 'Brewed Jasmine Tea, Passion Fruit, Ice';
-    if (name.includes('strawberry')) return 'Brewed Jasmine Tea, Strawberry Syrup, Ice';
-    if (name.includes('lychee')) return 'Brewed Jasmine Tea, Lychee Syrup, Ice';
-    if (name.includes('lemon')) return 'Brewed Jasmine Tea, Fresh Lemon, Ice';
-    return 'Brewed Green Tea, Fruit Syrup, Ice';
+}
+
+// Real-time listener for database stock & recipe updates
+let realtimeStockListenerInitialized = false;
+function initRealtimeStockListener() {
+  if (!db || realtimeStockListenerInitialized) return;
+  realtimeStockListenerInitialized = true;
+  try {
+    db.channel('public:chill_stock_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_ingredient' }, () => {
+        refreshInventoryStock();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_recipe' }, () => {
+        refreshInventoryStock();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_promotion' }, () => {
+        loadPromosFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_promotion_product' }, () => {
+        loadPromosFromSupabase();
+      })
+      .subscribe();
+  } catch (e) {
+    console.warn("Could not initialize realtime stock listener:", e);
   }
-  if (name.includes('soda') || name.includes('fizz')) return 'Carbonated Soda, Fruit Syrup, Fresh Calamansi, Ice';
-  if (name.includes('frappe')) return 'Blended Espresso, Ice, Fresh Milk, Whipped Cream';
-  if (name.includes('croffle') || name.includes('waffle')) return 'Butter Croissant Dough, Sweet Glaze, Whipped Cream';
-  if (name.includes('sandwich') || name.includes('burger')) return 'Toasted Bread, Sliced Ham, Cheddar Cheese, Mayo Dressing';
-  if (name.includes('fries')) return 'Crispy Potato Fries, Barbecue & Cheese Seasoning';
-  if (name.includes('nacho')) return 'Crispy Corn Tortilla, Seasoned Ground Beef, Melted Cheese Sauce';
-  if (name.includes('cheese stick')) return 'Golden Cheese Sticks, Garlic Mayonnaise Dip';
-  if (name.includes('silog') || name.includes('tapa') || name.includes('tocino') || name.includes('liempo') || name.includes('porkchop') || name.includes('spam')) {
-    return 'Garlic Sinangag Rice, Sunny-Side Fried Egg, House Marinated Protein';
-  }
-  if (name.includes('spaghetti') || name.includes('pasta') || name.includes('carbonara')) {
-    return 'Al Dente Pasta, Cream Sauce, Bacon Bits, Parmesan Cheese';
-  }
-  if (cat === 1 || cat === 2) return 'House Espresso Blend, Purified Water';
-  if (cat === 4 || cat === 8) return 'Fresh Dairy Milk, Sweetener, Ice';
-  if (cat === 9) return 'Brewed Tea Blend, Creamer, Tapioca Pearls';
-  if (cat === 5) return 'Blended Ice Base, Flavoring, Fresh Milk';
-  if (cat === 6) return 'Green Tea Infusion, Fruit Puree, Ice';
-  if (cat === 12) return 'Savory Finger Food, Signature Dip';
-  if (cat === 13) return 'Garlic Fried Rice, Fried Egg, Savory Main';
-  if (cat === 15) return 'Italian Pasta, House Sauce, Seasoning';
-  return 'Fresh ingredients crafted upon order';
+
+  // Periodic polling every 10s as a failsafe
+  setInterval(refreshInventoryStock, 10000);
 }
 
 // ═════════════════════════════════════════
@@ -114,7 +329,7 @@ function getProductIngredients(productId, productName, categoryId, productRecipe
 // ═════════════════════════════════════════
 async function loadMenuFromSupabase() {
   if (!db) {
-    console.error("❌ Supabase connection not found!");
+    console.error("Supabase connection not found!");
     return;
   }
   
@@ -198,6 +413,24 @@ async function loadMenuFromSupabase() {
       .eq('enabled', 1);
     if (arData) addonRecipesList = arData;
 
+    // 7. Fetch promotions (chill_promotion) & affected products (chill_promotion_product)
+    let promotionsList = [];
+    let promotionProductsList = [];
+    const { data: promoData } = await db
+      .from('chill_promotion')
+      .select('*')
+      .eq('isActive', 1);
+    if (promoData) promotionsList = promoData;
+
+    const { data: promoProdData } = await db
+      .from('chill_promotion_product')
+      .select('*')
+      .eq('enabled', 1);
+    if (promoProdData) promotionProductsList = promoProdData;
+
+    ALL_PROMOTIONS = promotionsList;
+    buildPromoMap(promotionsList, promotionProductsList);
+
     ALL_SIZES = sizes;
     ALL_PRODUCT_SIZES = productSizes;
     ALL_ADDONS = addonsList;
@@ -270,17 +503,46 @@ async function loadMenuFromSupabase() {
     });
     ALL_ADDON_RECIPES = addonRecipeMap;
 
-    // Map recipe ingredients by productId
+    // Map recipe ingredients and IDs by productId
     const productRecipeMap = {};
+    const productRecipeIdsMap = {};
     recipesList.forEach(r => {
-      if (!productRecipeMap[r.productId]) {
-        productRecipeMap[r.productId] = [];
+      const pId = r.productId;
+      const numPId = Number(r.productId);
+      const ingId = Number(r.ingredientId);
+
+      if (!productRecipeMap[pId]) productRecipeMap[pId] = [];
+      if (!productRecipeMap[numPId]) productRecipeMap[numPId] = productRecipeMap[pId];
+      if (!productRecipeIdsMap[pId]) productRecipeIdsMap[pId] = [];
+      if (!productRecipeIdsMap[numPId]) productRecipeIdsMap[numPId] = productRecipeIdsMap[pId];
+
+      if (!productRecipeIdsMap[pId].includes(ingId)) {
+        productRecipeIdsMap[pId].push(ingId);
       }
-      const ingName = ingredientLookup[r.ingredientId];
-      if (ingName && !productRecipeMap[r.productId].includes(ingName)) {
-        productRecipeMap[r.productId].push(ingName);
+      const ingName = ingredientLookup[r.ingredientId] || ingredientLookup[ingId];
+      if (ingName && !productRecipeMap[pId].includes(ingName)) {
+        productRecipeMap[pId].push(ingName);
       }
     });
+
+    // Detect out of stock ingredients in database
+    const oosIds = new Set();
+    const oosMap = {};
+    ingredientsList.forEach(ing => {
+      const stock = (ing.currentStock !== null && ing.currentStock !== undefined) ? Number(ing.currentStock) : null;
+      const status = (ing.status !== null && ing.status !== undefined) ? String(ing.status).trim() : null;
+      const isOOS = (stock !== null && !isNaN(stock) && stock <= 0) ||
+                    status === '0' ||
+                    status === 'out_of_stock' ||
+                    status === 'Out of Stock' ||
+                    status === 'inactive';
+      if (isOOS) {
+        oosIds.add(ing.ingredientId);
+        oosMap[ing.ingredientId] = ing;
+      }
+    });
+    OOS_INGREDIENT_IDS = oosIds;
+    OOS_INGREDIENT_MAP = oosMap;
 
     if (productsData && productsData.length > 0) {
       ALL_ITEMS = productsData.map(item => {
@@ -304,7 +566,8 @@ async function loadMenuFromSupabase() {
 
         const ingList = productRecipeMap[item.productId] || [];
         const cleanDesc = (item.description || item.desc || '').replace(/^''$/, '').trim();
-        const recipeText = getProductIngredients(item.productId, item.productName || item.name, item.categoryId, productRecipeMap);
+        const recipeText = getProductIngredients(item.productId, productRecipeMap);
+        const stockStatus = checkProductStockStatus(item, productRecipeIdsMap, oosIds, oosMap, ingredientsList);
 
         return {
           ...item,
@@ -319,9 +582,18 @@ async function loadMenuFromSupabase() {
           maxPrice,
           basePrice: minPrice,
           price: hasDirectPrice ? rawPrice : minPrice,
-          emoji: getItemEmoji(item)
+          imageUrl: item.imageUrl || '',
+          isOutOfStock: stockStatus.isOutOfStock,
+          outOfStockReason: stockStatus.reason,
+          promo: null,
+          promoPrice: null,
+          promoMinPrice: null,
+          promoMaxPrice: null
         };
       });
+
+      // Apply promotions after ALL_ITEMS is built
+      ALL_ITEMS.forEach(item => applyPromoToItem(item));
 
       // Find top selling product from actual orders
       await loadTopSellingProduct();
@@ -329,10 +601,11 @@ async function loadMenuFromSupabase() {
       buildGrids();
       syncUI();
       preloadOrderNumbers();
-      if (typeof initPromoSlideshow === 'function') initPromoSlideshow();
+      updatePromoCardUI(ALL_PROMOTIONS);
+      initRealtimeStockListener();
     }
   } catch (err) {
-    console.error("❌ Failed to load menu:", err);
+    console.error("Failed to load menu:", err);
     showToast("Error loading menu from cloud.");
   }
 }
@@ -369,7 +642,11 @@ async function loadTopSellingProduct() {
       });
 
       const sorted = Array.from(salesMap.values()).sort((a,b) => b.score - a.score);
-      if (sorted.length > 0 && sorted[0].score > 0) {
+      // Prefer top seller that is currently in stock
+      const inStockTop = sorted.find(s => s.product && !s.product.isOutOfStock);
+      if (inStockTop) {
+        TOP_SELLING_PRODUCT = inStockTop.product;
+      } else if (sorted.length > 0 && sorted[0].score > 0) {
         TOP_SELLING_PRODUCT = sorted[0].product;
       }
     }
@@ -378,7 +655,7 @@ async function loadTopSellingProduct() {
   }
 
   if (!TOP_SELLING_PRODUCT) {
-    TOP_SELLING_PRODUCT = ALL_ITEMS.find(i => i.productName.toLowerCase().includes('latte')) || ALL_ITEMS[0];
+    TOP_SELLING_PRODUCT = ALL_ITEMS.find(i => !i.isOutOfStock) || ALL_ITEMS[0];
   }
 
   renderTopSellingCard(TOP_SELLING_PRODUCT);
@@ -386,14 +663,17 @@ async function loadTopSellingProduct() {
 
 function renderTopSellingCard(product) {
   if (!product) return;
-  const featEmoji = document.getElementById('featEmoji');
+  const featImg = document.getElementById('featImg');
   const featName = document.getElementById('featName');
   const featDesc = document.getElementById('featDesc');
   const featPrice = document.getElementById('featPrice');
   const featCard = document.getElementById('featCard');
   const featAddBtn = document.getElementById('featAddBtn');
 
-  if (featEmoji) featEmoji.textContent = product.emoji || getItemEmoji(product);
+  if (featImg) {
+    featImg.src = getProductImage(product);
+    featImg.onerror = () => { featImg.src = 'placeholder.svg'; };
+  }
   if (featName) featName.textContent = product.productName;
   if (featDesc) {
     const cleanDesc = (product.description && product.description !== "''") ? product.description : '';
@@ -410,8 +690,31 @@ function renderTopSellingCard(product) {
     }
   }
 
+  const isOOS = product.isOutOfStock;
+  if (featCard) {
+    featCard.classList.toggle('out-of-stock', !!isOOS);
+    const existingBadge = featCard.querySelector('.stock-badge-oos');
+    if (existingBadge) existingBadge.remove();
+    if (isOOS) {
+      const b = document.createElement('span');
+      b.className = 'stock-badge-oos';
+      b.textContent = 'Out of Stock';
+      featCard.querySelector('.feat-img-wrap')?.appendChild(b);
+    }
+  }
+
+  if (featAddBtn) {
+    featAddBtn.disabled = !!isOOS;
+    featAddBtn.classList.toggle('disabled', !!isOOS);
+    featAddBtn.textContent = isOOS ? '✕' : '+';
+  }
+
   const fn = (e) => {
     if (e) e.stopPropagation();
+    if (product.isOutOfStock) {
+      showToast(`${product.productName} is currently out of stock`, 'warning');
+      return;
+    }
     triggerConfirmation(product);
   };
 
@@ -440,17 +743,17 @@ async function loadCategoriesFromSupabase() {
     let html = `<button class="cat-pill active" data-cat="all">All</button>`;
     
     const slugLabels = {
-      espresso: '☕ Espresso',
-      noncoffee: '🥛 Non-Coffee',
-      milktea: '🧋 Milk Tea',
-      frappe: '🥤 Frappe',
-      fruittea: '🍓 Fruit Tea',
-      soda: '🫧 Soda',
-      croffle: '🥐 Croffles',
-      sandwiches: '🥪 Sandwiches',
-      snacks: '🍟 Snacks',
-      silog: '🍳 Silog Meals',
-      pasta: '🍝 Pasta'
+      espresso: 'Espresso',
+      noncoffee: 'Non-Coffee',
+      milktea: 'Milk Tea',
+      frappe: 'Frappe',
+      fruittea: 'Fruit Tea',
+      soda: 'Soda',
+      croffle: 'Croffles',
+      sandwiches: 'Sandwiches',
+      snacks: 'Snacks',
+      silog: 'Silog Meals',
+      pasta: 'Pasta'
     };
 
     const addedSlugs = new Set();
@@ -476,7 +779,7 @@ async function loadCategoriesFromSupabase() {
       p.addEventListener('click', () => filterCat(p, p.dataset.cat));
     });
   } catch (err) {
-    console.error("❌ Failed to load categories:", err);
+    console.error("Failed to load categories:", err);
   }
 }
 
@@ -505,48 +808,84 @@ loadCategoriesFromSupabase();
 // ═════════════════════════════════════════
 function makeCard(item) {
   const d = document.createElement('div');
-  d.className = 'item-card';
+  d.dataset.productId = item.productId;
+  const isOOS = !!item.isOutOfStock;
+  d.className = `item-card ${isOOS ? 'out-of-stock' : ''}`;
 
   const itemName = item.productName || item.name || 'Unknown Item';
-  // Do NOT display recipe on card; only genuine marketing description if present
   const cleanDesc = (item.description && item.description.trim() && item.description.trim() !== "''") ? item.description.trim() : '';
-  const itemEmoji = item.emoji || getItemEmoji(item);
+  const itemImgSrc = getProductImage(item);
 
+  // Build price HTML with promo support
   let priceHTML = '';
-
   if (item.hasSizes && item.sizes && item.sizes.length > 0) {
-    if (item.minPrice !== item.maxPrice) {
-      priceHTML = `₱${item.minPrice} - ₱${item.maxPrice}`;
+    if (item.promo) {
+      const dispMin = item.promoMinPrice;
+      const dispMax = item.promoMaxPrice;
+      priceHTML = dispMin !== dispMax
+        ? `<span class="price-original">₱${item.minPrice}–₱${item.maxPrice}</span> <span class="price-promo">₱${dispMin}–₱${dispMax}</span>`
+        : `<span class="price-original">₱${item.minPrice}</span> <span class="price-promo">₱${dispMin}</span>`;
     } else {
-      priceHTML = `₱${item.minPrice}`;
+      priceHTML = item.minPrice !== item.maxPrice
+        ? `₱${item.minPrice} - ₱${item.maxPrice}`
+        : `₱${item.minPrice}`;
     }
   } else {
-    priceHTML = `₱${item.price || 0}`;
+    if (item.promo) {
+      priceHTML = `<span class="price-original">₱${item.price || 0}</span> <span class="price-promo">₱${item.promoPrice}</span>`;
+    } else {
+      priceHTML = `₱${item.price || 0}`;
+    }
   }
 
-  let sizePillsHTML = '';
-  if (item.hasSizes && item.sizes && item.sizes.length > 0) {
-    sizePillsHTML = `
-      <div class="card-size-tags">
-        ${item.sizes.map(s => `<span class="size-tag">${s.sizeName}</span>`).join('')}
-      </div>
-    `;
-  }
+  const promoLabel = item.promo
+    ? `<span class="promo-badge-card">${item.promo.discountType === 1 ? `-${item.promo.discountValue}%` : `-₱${item.promo.discountValue}`} ${item.promo.promotionName}</span>`
+    : '';
+
+  const sizePillsHTML2 = (item.hasSizes && item.sizes && item.sizes.length > 0)
+    ? `<div class="card-size-tags">${item.sizes.map(s => `<span class="size-tag">${s.sizeName}</span>`).join('')}</div>`
+    : '';
+
+  const stockBadgeHTML = isOOS ? `<span class="stock-badge-oos">Out of Stock</span>` : '';
+  const addBtnHTML = isOOS
+    ? `<button class="add-btn disabled" disabled aria-label="Out of stock">✕</button>`
+    : `<button class="add-btn" aria-label="Add ${itemName}">+</button>`;
 
   d.innerHTML = `
-    <div class="item-emoji">${itemEmoji}</div>
+    <div class="item-img-wrap">
+      ${stockBadgeHTML}
+      ${promoLabel}
+      <img class="item-img" src="${itemImgSrc}" alt="${itemName}" loading="lazy" onerror="this.onerror=null;this.src='placeholder.svg';" />
+    </div>
     <div class="item-name">${itemName}</div>
     ${cleanDesc ? `<div class="item-desc">${cleanDesc}</div>` : ''}
+    ${item.recipe ? `<div class="item-recipe"><strong>Ingredients:</strong> ${item.recipe}</div>` : ''}
     <div class="card-spacer"></div>
-    ${sizePillsHTML}
+    ${sizePillsHTML2}
     <div class="card-footer">
       <div class="item-price">${priceHTML}</div>
-      <button class="add-btn" aria-label="Add ${itemName}">+</button>
+      ${addBtnHTML}
     </div>
   `;
-  const fn = () => triggerConfirmation(item);
-  d.querySelector('.add-btn').addEventListener('click', e => { e.stopPropagation(); fn(); });
-  d.addEventListener('click', fn);
+
+  const handleCardClick = () => {
+    const currentItem = ALL_ITEMS.find(i => i.productId === item.productId) || item;
+    if (currentItem.isOutOfStock) {
+      showToast(`${currentItem.productName || itemName} is currently out of stock (${currentItem.outOfStockReason || 'unavailable ingredients'})`, 'warning');
+      return;
+    }
+    triggerConfirmation(currentItem);
+  };
+
+  const addBtn = d.querySelector('.add-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      handleCardClick();
+    });
+  }
+  d.addEventListener('click', handleCardClick);
+
   return d;
 }
 
@@ -580,9 +919,10 @@ function goTo(id) {
   cur = id;
   next.scrollTo(0, 0);
   if (id === 'cartScreen') renderCart();
+  if (id === 'menuScreen') refreshInventoryStock();
 }
 
-function addItem(name, emoji, price, desc) {
+function addItem(name, imageUrl, price, desc) {
   const isPromoItem = name.includes('[-20%') || name.includes('B1T1 Claimed');
   const ex = cart.find(i => i.name === name);
   
@@ -593,7 +933,7 @@ function addItem(name, emoji, price, desc) {
     }
     ex.qty++;
   } else {
-    cart.push({name, emoji, price, desc, qty:1});
+    cart.push({ name, imageUrl: imageUrl || 'placeholder.svg', price, desc, qty: 1 });
   }
   syncUI();
   if (cur === 'cartScreen') renderCart(); 
@@ -624,7 +964,9 @@ function renderCart() {
       : cart.map((item, idx) => {
           return `
           <div class="cart-item">
-            <div class="ci-emoji">${item.emoji}</div>
+            <div class="ci-img-wrap">
+              <img class="ci-img" src="${item.imageUrl || 'placeholder.svg'}" alt="${item.name}" onerror="this.onerror=null;this.src='placeholder.svg';" />
+            </div>
             <div class="ci-info">
               <div class="ci-name">${item.name}</div>
               <div class="ci-price">₱${(item.price*item.qty).toLocaleString()}</div>
@@ -764,7 +1106,7 @@ async function placeOrder() {
       name: item.name,
       price: item.price,
       qty: item.qty,
-      emoji: item.emoji || '☕',
+      imageUrl: item.imageUrl || '',
       desc: item.desc || '',
       subtotal: item.price * item.qty
     })),
@@ -778,10 +1120,10 @@ async function placeOrder() {
     db.from('chill_kiosk_queue')
       .insert([kioskPayload])
       .then(({ data, error }) => {
-        if (error) console.error('❌ Failed to insert to chill_kiosk_queue:', error);
-        else console.log('✅ Order recorded in chill_kiosk_queue:', data);
+        if (error) console.error('Failed to insert to chill_kiosk_queue:', error);
+        else console.log('Order recorded in chill_kiosk_queue:', data);
       })
-      .catch(err => console.error('❌ Exception inserting to chill_kiosk_queue:', err));
+      .catch(err => console.error('Exception inserting to chill_kiosk_queue:', err));
   }
 
   const now = new Date();
@@ -1039,10 +1381,19 @@ function updateModalPrice() {
   }
 
   const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
-  const finalPrice = basePrice + addonTotal;
+  const promo = itemPendingConfirmation.promo || null;
+  const discountedBase = promo ? applyPromo(basePrice, promo) : basePrice;
+  const finalPrice = discountedBase + addonTotal;
 
   const priceValEl = document.getElementById('modal-price-value');
-  if (priceValEl) priceValEl.textContent = '₱' + finalPrice;
+  if (priceValEl) {
+    if (promo) {
+      const originalTotal = basePrice + addonTotal;
+      priceValEl.innerHTML = `<span style="text-decoration:line-through;color:var(--muted);font-size:0.85em;font-weight:600;">₱${originalTotal}</span> <span style="color:var(--promo-color,#E53935);font-weight:800;">₱${finalPrice}</span>`;
+    } else {
+      priceValEl.textContent = '₱' + finalPrice;
+    }
+  }
 }
 
 function triggerConfirmation(item) {
@@ -1051,25 +1402,47 @@ function triggerConfirmation(item) {
   
   const itemName = item.productName || item.name || 'Café Latte';
   const cleanDesc = (item.description && item.description.trim() && item.description.trim() !== "''") ? item.description.trim() : '';
-  const itemEmoji = item.emoji || getItemEmoji(item);
   const itemRecipe = (item.recipe || '').trim();
   const itemUid = item.productId || item.uid || '—';
 
   const uidEl = document.getElementById('modal-uid');
-  const emojiEl = document.getElementById('modal-emoji');
+  const modalImg = document.getElementById('modal-img');
   const titleEl = document.getElementById('modal-title');
   const descEl = document.getElementById('modal-desc');
   const recipeTextEl = document.getElementById('modal-recipe-text');
   const recipeContent = document.getElementById('modal-recipe-content');
 
   if (uidEl) uidEl.textContent = 'UID: ' + itemUid;
-  if (emojiEl) emojiEl.textContent = itemEmoji;
+  if (modalImg) {
+    modalImg.src = getProductImage(item);
+    modalImg.onerror = () => { modalImg.src = 'placeholder.svg'; };
+  }
   if (titleEl) titleEl.textContent = itemName;
   if (descEl) {
     descEl.textContent = cleanDesc;
     descEl.style.display = cleanDesc ? 'block' : 'none';
   }
-  
+
+  // Show/hide promo badge in modal
+  let promoEl = document.getElementById('modal-promo-label');
+  if (item.promo) {
+    const pLabel = item.promo.discountType === 1
+      ? `${item.promo.discountValue}% OFF — ${item.promo.promotionName}`
+      : `₱${item.promo.discountValue} OFF — ${item.promo.promotionName}`;
+    if (!promoEl) {
+      promoEl = document.createElement('div');
+      promoEl.id = 'modal-promo-label';
+      promoEl.className = 'modal-promo-label';
+      if (titleEl && titleEl.parentNode) {
+        titleEl.parentNode.insertBefore(promoEl, titleEl.nextSibling);
+      }
+    }
+    promoEl.textContent = pLabel;
+    promoEl.style.display = 'block';
+  } else if (promoEl) {
+    promoEl.style.display = 'none';
+  }
+
   // Ingredients directly inside the product modal (Image 2)
   if (recipeContent) {
     if (itemRecipe) {
@@ -1141,9 +1514,19 @@ function triggerConfirmation(item) {
       const isSyrupOrPowder = (a.addonsId === 3) || /syrup|sauce|powder/i.test(aName);
       const subRecipes = (ALL_ADDON_RECIPES[a.addonsId] || []);
 
+      // Check if addon single ingredient is out of stock
+      let isAddonOOS = false;
+      if (!isSyrupOrPowder && subRecipes.length === 1) {
+        if (OOS_INGREDIENT_IDS.has(subRecipes[0].ingredientId)) isAddonOOS = true;
+      }
+
       if (isSyrupOrPowder && subRecipes.length > 0) {
         // Dropdown container for syrup/sauce/powder varieties
-        const optionsHtml = subRecipes.map(sr => `<option value="${sr.ingredientName}">${sr.ingredientName}</option>`).join('');
+        const optionsHtml = subRecipes.map(sr => {
+          const isIngOOS = OOS_INGREDIENT_IDS.has(sr.ingredientId);
+          return `<option value="${sr.ingredientName}" ${isIngOOS ? 'disabled' : ''}>${sr.ingredientName}${isIngOOS ? ' (Out of Stock)' : ''}</option>`;
+        }).join('');
+
         addonBtnsHtml += `
           <div class="addon-row-wrapper" data-addon-id="${a.addonsId}">
             <button class="addon-btn" data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}" data-has-dropdown="true">
@@ -1161,8 +1544,8 @@ function triggerConfirmation(item) {
       } else {
         addonBtnsHtml += `
           <div class="addon-row-wrapper" data-addon-id="${a.addonsId}">
-            <button class="addon-btn" data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}">
-              <span>${a.addonsName}</span>
+            <button class="addon-btn ${isAddonOOS ? 'disabled' : ''}" ${isAddonOOS ? 'disabled' : ''} data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}">
+              <span>${a.addonsName}${isAddonOOS ? ' (Out of Stock)' : ''}</span>
               <span>${priceText}</span>
             </button>
           </div>
@@ -1191,6 +1574,7 @@ function triggerConfirmation(item) {
 
     customBtns.forEach(btn => {
       btn.addEventListener('click', () => {
+        if (btn.disabled) return;
         const aId = Number(btn.dataset.addonId);
         const aName = btn.dataset.name;
         const aPrice = parseFloat(btn.dataset.price) || 0;
@@ -1234,6 +1618,20 @@ function triggerConfirmation(item) {
     if (addonOptionsContainer) addonOptionsContainer.innerHTML = '';
   }
 
+  // Manage Confirm Button state based on out of stock
+  const confirmBtn = document.getElementById('btn-confirm-order');
+  if (confirmBtn) {
+    if (item.isOutOfStock) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Out of Stock';
+      confirmBtn.classList.add('disabled');
+    } else {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Add to Order';
+      confirmBtn.classList.remove('disabled');
+    }
+  }
+
   updateModalPrice();
   if (confirmationOverlay) confirmationOverlay.classList.remove('hidden');
 } 
@@ -1250,9 +1648,18 @@ const confirmOrderBtn = document.getElementById('btn-confirm-order');
 if (confirmOrderBtn) {
   confirmOrderBtn.addEventListener('click', () => {
     if (itemPendingConfirmation) {
+      if (itemPendingConfirmation.isOutOfStock) {
+        showToast('Sorry, this item is out of stock', 'warning');
+        return;
+      }
       let finalName = itemPendingConfirmation.productName || itemPendingConfirmation.name;
       const basePrice = currentSelectedSize ? currentSelectedSize.price : (Number(itemPendingConfirmation.price || itemPendingConfirmation.minPrice || 0));
       const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+
+      // Apply promo discount if applicable
+      const promo = itemPendingConfirmation.promo || null;
+      const discountedBase = promo ? applyPromo(basePrice, promo) : basePrice;
+      const cartTotal = discountedBase + addonTotal;
 
       if (currentSelectedSize) {
         finalName += ` (${currentSelectedSize.sizeName})`;
@@ -1267,9 +1674,12 @@ if (confirmOrderBtn) {
         }).join(', ');
         finalName += ` [+ ${addonNames}]`;
       }
+
+      if (promo) {
+        finalName += ` [${promo.discountType === 1 ? `-${promo.discountValue}%` : `-₱${promo.discountValue}`} ${promo.promotionName}]`;
+      }
       
-      const itemEmoji = itemPendingConfirmation.emoji || getItemEmoji(itemPendingConfirmation);
-      addItem(finalName, itemEmoji, basePrice + addonTotal, itemPendingConfirmation.description || itemPendingConfirmation.desc);
+      addItem(finalName, getProductImage(itemPendingConfirmation), cartTotal, itemPendingConfirmation.description || itemPendingConfirmation.desc);
       if (confirmationOverlay) confirmationOverlay.classList.add('hidden');
       itemPendingConfirmation = null;
     }
@@ -1363,30 +1773,103 @@ function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotal
 // 8. SUPABASE-DRIVEN PROMO & QUIZ HANDLERS
 // ═════════════════════════════════════════
 
-// Future implementation: Fetch promotions dynamically from Supabase table 'chill_promotion'
+// ─── PROMOTION CARD DISPLAY & ROTATION ────────────────────────────────────────
+let promoSlideInterval = null;
+
+function updatePromoCardUI(promotions) {
+  const slideshow = document.getElementById('promoSlideshow');
+  const heroGrid = document.querySelector('.hero-grid');
+  if (!slideshow) return;
+
+  if (promoSlideInterval) {
+    clearInterval(promoSlideInterval);
+    promoSlideInterval = null;
+  }
+
+  const now = new Date();
+  const activePromos = (promotions || []).filter(p => {
+    const isActive = p.isActive === 1 || p.isActive === true || p.isActive === '1';
+    if (!isActive) return false;
+    if (p.startDate && new Date(p.startDate) > now) return false;
+    if (p.endDate && new Date(p.endDate) < now) return false;
+    return true;
+  });
+
+  if (!activePromos || activePromos.length === 0) {
+    // If no active promotion: hide the card and display Virtual Barista only!
+    slideshow.style.display = 'none';
+    slideshow.classList.add('hidden');
+    slideshow.innerHTML = '';
+    if (heroGrid) heroGrid.classList.add('no-promos');
+    return;
+  }
+
+  // Active promotion exists: display beside "Not sure what to get?"
+  slideshow.style.display = '';
+  slideshow.classList.remove('hidden');
+  if (heroGrid) heroGrid.classList.remove('no-promos');
+
+  slideshow.innerHTML = activePromos.map((p, idx) => {
+    let discountBadge = '';
+    if (p.discountType === 1) {
+      discountBadge = `${p.discountValue}% OFF`;
+    } else if (p.discountType === 2) {
+      discountBadge = `₱${p.discountValue} OFF`;
+    } else if (p.discountValue) {
+      discountBadge = `SAVE ₱${p.discountValue}`;
+    } else {
+      discountBadge = 'SPECIAL OFFER';
+    }
+
+    const promoTitle = p.promotionName || 'Special Promotion';
+    const subText = p.description && p.description.trim() ? p.description.trim() : 'Limited time discount on eligible items';
+
+    return `
+      <div class="slide ${idx === 0 ? 'active' : ''}" data-index="${idx}">
+        <div class="slide-fomo">PROMOTION</div>
+        <div class="slide-name">${promoTitle}</div>
+        <div class="slide-sub" style="font-size: 12px; opacity: 0.9; margin-bottom: 8px;">${subText}</div>
+        <div class="slide-promo">${discountBadge}</div>
+      </div>
+    `;
+  }).join('');
+
+  if (activePromos.length > 1) {
+    let currentSlide = 0;
+    const slides = slideshow.querySelectorAll('.slide');
+    promoSlideInterval = setInterval(() => {
+      slides[currentSlide].classList.remove('active');
+      currentSlide = (currentSlide + 1) % slides.length;
+      slides[currentSlide].classList.add('active');
+    }, 4500);
+  }
+
+  slideshow.onclick = () => {
+    const promoNames = activePromos.map(p => p.promotionName).join(', ');
+    showToast(`${promoNames} applied to eligible items in menu!`, 'info');
+  };
+}
+
 async function loadPromosFromSupabase() {
   if (!db) return;
   try {
-    const { data, error } = await db.from('chill_promotion').select('*');
-    if (error) throw error;
-    
-    const slideshow = document.getElementById('promoSlideshow');
-    if (!slideshow) return;
-
-    if (data && data.length > 0) {
-      // Render promos fetched live from Supabase
-      slideshow.innerHTML = data.map((p, idx) => `
-        <div class="slide ${idx === 0 ? 'active' : ''}" data-index="${idx}">
-          <div class="slide-fomo">${p.promoType || 'Special Offer'}</div>
-          <div class="slide-name">${p.promoName || p.name}</div>
-          <div class="slide-promo">${p.details || ''}</div>
-        </div>
-      `).join('');
-    } else {
-      slideshow.innerHTML = `<div class="slide active"><div class="slide-name">Welcome to ChillVentoryx</div></div>`;
+    const [promoRes, promoProdRes] = await Promise.all([
+      db.from('chill_promotion').select('*').eq('isActive', 1),
+      db.from('chill_promotion_product').select('*').eq('enabled', 1)
+    ]);
+    if (!promoRes.error && promoRes.data) {
+      ALL_PROMOTIONS = promoRes.data;
+      const prodData = (!promoProdRes.error && promoProdRes.data) ? promoProdRes.data : [];
+      buildPromoMap(ALL_PROMOTIONS, prodData);
+      if (ALL_ITEMS && ALL_ITEMS.length > 0) {
+        ALL_ITEMS.forEach(item => applyPromoToItem(item));
+        buildGrids();
+      }
     }
+    updatePromoCardUI(ALL_PROMOTIONS);
   } catch (err) {
-    console.error("❌ Failed to load promotions from cloud:", err);
+    console.error("Failed to load promotions from cloud:", err);
+    updatePromoCardUI([]);
   }
 }
 
@@ -1490,15 +1973,13 @@ function renderQuizStep() {
   if (QUIZ_STATE.step === 1) {
     if (badgeEl) badgeEl.textContent = 'Step 1 of 3';
     titleEl.textContent = 'What are you in the mood for?';
-    if (hintEl) hintEl.textContent = 'Start by choosing a drink or a snack ✨';
+    if (hintEl) hintEl.textContent = 'Start by choosing a drink or a snack';
 
     optionsContainer.innerHTML = `
       <button class="craving-btn" onclick="handleQuizAnswer(1, 'drink')">
-        <span style="font-size:22px;">🥤</span>
         <span>A Drink</span>
       </button>
       <button class="craving-btn" onclick="handleQuizAnswer(1, 'snack')">
-        <span style="font-size:22px;">🥐</span>
         <span>A Snack / Food</span>
       </button>
     `;
@@ -1511,11 +1992,9 @@ function renderQuizStep() {
 
       optionsContainer.innerHTML = `
         <button class="craving-btn" onclick="handleQuizAnswer(2, 'cold')">
-          <span style="font-size:22px;">🧊</span>
           <span>Cold & Iced</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(2, 'hot')">
-          <span style="font-size:22px;">☕</span>
           <span>Warm & Hot</span>
         </button>
       `;
@@ -1525,15 +2004,12 @@ function renderQuizStep() {
 
       optionsContainer.innerHTML = `
         <button class="craving-btn" onclick="handleQuizAnswer(2, 'sweet')">
-          <span style="font-size:22px;">🍫</span>
           <span>Sweet Pastry & Waffles</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(2, 'savory')">
-          <span style="font-size:22px;">🧀</span>
           <span>Cheesy & Savory</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(2, 'meaty')">
-          <span style="font-size:22px;">🍖</span>
           <span>Meaty & Hearty</span>
         </button>
       `;
@@ -1548,15 +2024,12 @@ function renderQuizStep() {
 
       optionsContainer.innerHTML = `
         <button class="craving-btn" onclick="handleQuizAnswer(3, 'sweet')">
-          <span style="font-size:22px;">🍯</span>
           <span>Sweet & Creamy</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(3, 'bold')">
-          <span style="font-size:22px;">☕</span>
           <span>Strong & Bold Espresso</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(3, 'fruity')">
-          <span style="font-size:22px;">🍓</span>
           <span>Fruity & Zesty</span>
         </button>
       `;
@@ -1566,15 +2039,12 @@ function renderQuizStep() {
 
       optionsContainer.innerHTML = `
         <button class="craving-btn" onclick="handleQuizAnswer(3, 'bites')">
-          <span style="font-size:22px;">🍟</span>
           <span>Finger Food & Bites</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(3, 'meal')">
-          <span style="font-size:22px;">🍳</span>
           <span>Full Meal (Silog / Pasta)</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(3, 'crispy')">
-          <span style="font-size:22px;">🥐</span>
           <span>Crispy Croffle / Pastry</span>
         </button>
       `;
@@ -1608,7 +2078,7 @@ function generateQuizRecommendations() {
   const hintEl = document.getElementById('quiz-hint');
   const optionsContainer = document.getElementById('quiz-options');
 
-  if (badgeEl) badgeEl.textContent = 'Recommendations Ready ✨';
+  if (badgeEl) badgeEl.textContent = 'Recommendations Ready';
   if (titleEl) titleEl.textContent = 'Here are your best matches!';
   if (hintEl) hintEl.textContent = 'Handpicked by your virtual barista just for you.';
   if (optionsContainer) optionsContainer.innerHTML = '';
@@ -1665,9 +2135,13 @@ function generateQuizRecommendations() {
     }
   }
 
-  // Fallback to general category pool if fewer than 3 items matched
+  // Filter out any out-of-stock items so customer is only recommended available products
+  matches = matches.filter(item => !item.isOutOfStock);
+
+  // Fallback to general in-stock pool if fewer than 3 items matched
   if (matches.length < 3) {
     const fallbackPool = ALL_ITEMS.filter(item => {
+      if (item.isOutOfStock) return false;
       const isDrink = ['espresso','noncoffee','milktea','frappe','fruittea','soda'].includes(item.cat);
       return type === 'drink' ? isDrink : !isDrink;
     });
@@ -1681,12 +2155,14 @@ function generateQuizRecommendations() {
       container.innerHTML = selectedRecs.map(item => {
         const pName = item.productName || item.name;
         const pPrice = (item.hasSizes && item.sizes && item.sizes.length > 0) ? `₱${item.minPrice}` : `₱${item.price || 0}`;
-        const pEmoji = item.emoji || getItemEmoji(item);
         const pId = item.productId || item.uid;
+        const pImg = getProductImage(item);
 
         return `
           <div class="quiz-rec-card" onclick="selectQuizRecommendation(${pId})">
-            <div class="quiz-rec-emoji">${pEmoji}</div>
+            <div class="quiz-rec-img-wrap">
+              <img class="quiz-rec-img" src="${pImg}" alt="${pName}" onerror="this.onerror=null;this.src='placeholder.svg';" />
+            </div>
             <div class="quiz-rec-name">${pName}</div>
             <div class="quiz-rec-price">${pPrice}</div>
             <button class="quiz-rec-btn">Order This →</button>
@@ -1694,7 +2170,7 @@ function generateQuizRecommendations() {
         `;
       }).join('');
     } else {
-      container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--muted); padding: 20px;">No exact matches found. Please explore the main menu!</p>`;
+      container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--muted); padding: 20px;">No exact in-stock matches found right now. Please explore the main menu!</p>`;
     }
   }
 
@@ -1708,6 +2184,10 @@ function selectQuizRecommendation(productId) {
   closeQuiz();
   const found = ALL_ITEMS.find(i => (i.productId == productId || i.uid == productId));
   if (found) {
+    if (found.isOutOfStock) {
+      showToast(`${found.productName} is currently out of stock`, 'warning');
+      return;
+    }
     triggerConfirmation(found);
   }
 }
@@ -1716,8 +2196,9 @@ function selectQuizRecommendation(productId) {
 window.handleQuizAnswer = handleQuizAnswer;
 window.selectQuizRecommendation = selectQuizRecommendation;
 
-// Trigger promo loading & quiz on boot
+// Trigger promo loading, quiz & realtime stock sync on boot
 document.addEventListener('DOMContentLoaded', () => {
   loadPromosFromSupabase();
   initVirtualBaristaQuiz();
+  initRealtimeStockListener();
 });

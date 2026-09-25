@@ -42,13 +42,13 @@
     <div class="hero-grid">
       <div class="hero-banner" id="quizBannerCard" style="margin-bottom: 0;">
         <div class="hero-text">
-          <small>☕ your virtual barista</small>
+          <small>Your virtual barista</small>
           <h2>Not sure what to get?</h2>
-          <button style="pointer-events: none; margin-top: 15px; background: white; color: var(--primary); border: none; padding: 12px 24px; border-radius: 50px; font-family: var(--sans); font-weight: 800; font-size: 14px; position: relative; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">Find my vibe ✨</button>
+          <button style="pointer-events: none; margin-top: 15px; background: white; color: var(--primary); border: none; padding: 12px 24px; border-radius: 50px; font-family: var(--sans); font-weight: 800; font-size: 14px; position: relative; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">Find my vibe</button>
         </div>
       </div>
       
-      <div class="promo-slideshow" id="promoSlideshow"></div>
+      <div class="promo-slideshow hidden" id="promoSlideshow" style="display: none;"></div>
     </div>
 
     <!-- Pills -->
@@ -62,20 +62,22 @@
     </div>
 
     <div id="searchResultsContainer" class="hidden">
-      <div class="section-hd"><h3>🔎 Search Results</h3></div>
+      <div class="section-hd"><h3>Search Results</h3></div>
       <div id="searchResultsGrid" class="items-grid"></div>
       <div id="noResultsMsg" class="empty-state hidden">
-        <div class="empty-icon">🧐</div>
+        <div class="empty-icon">🔍</div>
         <p>Item doesn't exist</p>
       </div>
     </div>
     <div id="featuredHeader" class="section-hd filterable-title" data-category="espresso" style="margin-top: 16px;">
-      <h3>🔥 Top Selling</h3><span class="badge">Best Seller</span>
+      <h3>Top Selling</h3><span class="badge">Best Seller</span>
     </div>
     <div class="featured-card filterable-item" id="featCard" data-category="espresso"
          style="position: relative; flex-direction: column; align-items: stretch; gap: 0;">      
       <div style="display: flex; align-items: center; gap: 16px;">
-        <div class="feat-emoji" id="featEmoji">☕</div>
+        <div class="feat-img-wrap" id="featImgWrap">
+          <img id="featImg" class="feat-img" src="placeholder.svg" alt="Top Selling" onerror="this.onerror=null;this.src='placeholder.svg';" />
+        </div>
         <div class="feat-info">
           <div class="feat-name" id="featName">Loading top seller...</div>
           <div class="feat-desc" id="featDesc"></div>
@@ -85,37 +87,37 @@
       </div>     
     </div>
 
-    <div class="section-hd filterable-title" data-category="espresso"><h3>☕ Espresso</h3></div>
+    <div class="section-hd filterable-title" data-category="espresso"><h3>Espresso</h3></div>
     <div class="items-grid filterable-item" data-category="espresso" id="espressoGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="noncoffee"><h3>🥛 Non-Coffee</h3></div>
+    <div class="section-hd filterable-title" data-category="noncoffee"><h3>Non-Coffee</h3></div>
     <div class="items-grid filterable-item" data-category="noncoffee" id="noncoffeeGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="milktea"><h3>🧋 Milk Tea</h3></div>
+    <div class="section-hd filterable-title" data-category="milktea"><h3>Milk Tea</h3></div>
     <div class="items-grid filterable-item" data-category="milktea" id="milkteaGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="frappe"><h3>🥤 Frappe</h3></div>
+    <div class="section-hd filterable-title" data-category="frappe"><h3>Frappe</h3></div>
     <div class="items-grid filterable-item" data-category="frappe" id="frappeGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="fruittea"><h3>🍓 Fruit Tea</h3></div>
+    <div class="section-hd filterable-title" data-category="fruittea"><h3>Fruit Tea</h3></div>
     <div class="items-grid filterable-item" data-category="fruittea" id="fruitteaGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="soda"><h3>🫧 Soda</h3></div>
+    <div class="section-hd filterable-title" data-category="soda"><h3>Soda</h3></div>
     <div class="items-grid filterable-item" data-category="soda" id="sodaGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="croffle"><h3>🥐 Croffles</h3></div>
+    <div class="section-hd filterable-title" data-category="croffle"><h3>Croffles</h3></div>
     <div class="items-grid filterable-item" data-category="croffle" id="croffleGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="sandwiches"><h3>🥪 Sandwiches</h3></div>
+    <div class="section-hd filterable-title" data-category="sandwiches"><h3>Sandwiches</h3></div>
     <div class="items-grid filterable-item" data-category="sandwiches" id="sandwichesGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="snacks"><h3>🍟 Snacks</h3></div>
+    <div class="section-hd filterable-title" data-category="snacks"><h3>Snacks</h3></div>
     <div class="items-grid filterable-item" data-category="snacks" id="snacksGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="silog"><h3>🍳 Silog Meals</h3></div>
+    <div class="section-hd filterable-title" data-category="silog"><h3>Silog Meals</h3></div>
     <div class="items-grid filterable-item" data-category="silog" id="silogGrid"></div>
 
-    <div class="section-hd filterable-title" data-category="pasta"><h3>🍝 Pasta</h3></div>
+    <div class="section-hd filterable-title" data-category="pasta"><h3>Pasta</h3></div>
     <div class="items-grid filterable-item" data-category="pasta" id="pastaGrid"></div>
   </div>
 </div>
@@ -151,8 +153,8 @@
       <div class="notes-card" style="margin-bottom: 14px;">
         <div class="notes-label">Order Type</div>
         <div class="addon-options">
-          <button class="addon-btn order-type-btn active" data-type="Dine In">🍽️ Dine In</button>
-          <button class="addon-btn order-type-btn" data-type="Take Out">🛍️ Take Out</button>
+          <button class="addon-btn order-type-btn active" data-type="Dine In">Dine In</button>
+          <button class="addon-btn order-type-btn" data-type="Take Out">Take Out</button>
         </div>
       </div>
 
@@ -180,12 +182,12 @@
     <label class="pay-radio">
       <input type="radio" name="payment" value="Cash" checked>
       <span class="pay-custom"></span>
-      💵 Cash
+      Cash
     </label>
     <label class="pay-radio">
       <input type="radio" name="payment" value="E-Wallets">
       <span class="pay-custom"></span>
-      📱 E-Wallets
+      E-Wallets
     </label>
   </div>
 
@@ -217,9 +219,9 @@
       <div class="quiz-badge-wrap">
         <span class="quiz-step-badge" id="quizStepBadge">Step 1 of 3</span>
       </div>
-      <div class="subtitle">☕ YOUR VIRTUAL BARISTA</div>
+      <div class="subtitle">YOUR VIRTUAL BARISTA</div>
       <h2 id="quiz-question" class="title">What are you in the mood for?</h2>
-      <p id="quiz-hint" style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: -14px; margin-bottom: 22px;">Let us help find your perfect match ✨</p>
+      <p id="quiz-hint" style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: -14px; margin-bottom: 22px;">Let us help find your perfect match</p>
       
       <div id="quiz-options" class="button-group"></div>
       
@@ -232,7 +234,7 @@
 
     <div id="cravingResultsSection" class="hidden" style="background: var(--bg); padding: 24px 20px; border-radius: 0 0 24px 24px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h3 style="font-family: var(--serif); font-size: 20px; color: var(--text); margin: 0;">✨ We recommend for you...</h3>
+        <h3 style="font-family: var(--serif); font-size: 20px; color: var(--text); margin: 0;">We recommend for you...</h3>
         <button id="quiz-restart-btn" style="background: var(--primary-bg); color: var(--primary); border: none; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--sans);">↺ Try Again</button>
       </div>
       <div id="recommendationContainer" class="quiz-rec-grid"></div>
@@ -317,14 +319,16 @@
     <button class="modal-close-btn" id="modalCloseBtn" aria-label="Close">&times;</button>
     <div id="modal-uid" style="font-size: 11px; font-weight: 800; color: var(--muted); margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase;">UID: —</div>
     
-    <div class="modal-emoji" id="modal-emoji">☕</div>
+    <div class="modal-img-wrap" id="modal-img-wrap">
+      <img id="modal-img" class="modal-img" src="placeholder.svg" alt="Product Image" onerror="this.onerror=null;this.src='placeholder.svg';" />
+    </div>
     <h3 id="modal-title">Item Name</h3>
     <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px; margin-bottom:12px; display: none;">Description</p>
     
     <!-- Ingredients directly inside the product modal (clean & elegant) -->
     <div id="modal-recipe-content" class="modal-ingredients-box">
       <div class="ingredients-header">
-        <span class="ingredients-label">🌿 Ingredients</span>
+        <span class="ingredients-label">Ingredients</span>
         <div class="tooltip-container">
           <span class="info-icon">ⓘ</span>
           <div class="tooltip-text" id="modal-calories-text">Est. 0 kcal</div>

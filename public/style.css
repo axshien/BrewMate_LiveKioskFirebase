@@ -268,11 +268,21 @@
       width: 100%;
     }
     @media (min-width: 768px) {
-      .hero-grid {
+      .hero-grid:not(.no-promos) {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: clamp(16px, 2vw, 24px);
         align-items: stretch;
       }
+      .hero-grid.no-promos {
+        grid-template-columns: 1fr !important;
+      }
+    }
+    .hero-grid.no-promos {
+      grid-template-columns: 1fr !important;
+    }
+    .hero-grid.no-promos .promo-slideshow,
+    .promo-slideshow.hidden {
+      display: none !important;
     }
 
     .hero-banner, .promo-slideshow {
@@ -296,7 +306,7 @@
       transform: scale(0.98); 
     }
     .hero-banner::after {
-      content: '☕';
+      content: '';
       position: absolute; right: 16px; top: 50%;
       transform: translateY(-50%);
       font-size: clamp(65px, 11vw, 120px);
@@ -464,13 +474,26 @@
       transition: transform .12s, box-shadow .12s;
     }
     .featured-card:active { transform: scale(0.99); box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
-    .feat-emoji {
-      width: clamp(60px, 8vw, 80px);
-      height: clamp(60px, 8vw, 80px);
+    .feat-img-wrap {
+      width: clamp(64px, 8vw, 84px);
+      height: clamp(64px, 8vw, 84px);
       flex-shrink: 0;
-      background: var(--bg); border-radius: 18px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: clamp(30px, 4vw, 42px);
+      border-radius: 18px;
+      overflow: hidden;
+      background: var(--primary-bg);
+      border: 1px solid rgba(0,0,0,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .feat-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .feat-emoji {
+      display: none;
     }
     .feat-info { flex: 1; min-width: 0; }
     .feat-name  {
@@ -562,10 +585,109 @@
     }
     .item-card:active { transform: scale(0.97); box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
 
+    .item-img-wrap {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+      background: var(--primary-bg);
+      border: 1px solid rgba(0,0,0,0.05);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .item-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform .25s ease;
+    }
+    .item-card:hover:not(.out-of-stock) .item-img {
+      transform: scale(1.05);
+    }
+    .item-card.out-of-stock {
+      opacity: 0.6;
+      cursor: not-allowed;
+      filter: grayscale(40%);
+    }
+    .item-card.out-of-stock:hover {
+      transform: none;
+      box-shadow: 0 4px 16px rgba(30, 27, 46, 0.04);
+    }
+    .stock-badge-oos {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      background: #E53935;
+      color: #ffffff;
+      font-size: 9.5px;
+      font-weight: 800;
+      padding: 3px 7px;
+      border-radius: 6px;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      z-index: 2;
+      box-shadow: 0 2px 6px rgba(229, 57, 53, 0.4);
+    }
+    /* Promo badge on product card image */
+    .promo-badge-card {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: #E53935;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 3px 7px;
+      border-radius: 6px;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      z-index: 2;
+      box-shadow: 0 2px 6px rgba(229, 57, 53, 0.45);
+      max-width: 80px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    /* Strikethrough original price */
+    .price-original {
+      text-decoration: line-through;
+      color: var(--muted);
+      font-size: 0.82em;
+      font-weight: 600;
+      margin-right: 2px;
+    }
+    /* Discounted promo price */
+    .price-promo {
+      color: #E53935;
+      font-weight: 800;
+    }
+    /* Modal promo label banner */
+    .modal-promo-label {
+      display: inline-block;
+      background: #FDEDED;
+      color: #C0392B;
+      border: 1px solid #FADBD8;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 12px;
+      margin-bottom: 10px;
+      margin-top: 2px;
+      letter-spacing: 0.2px;
+    }
+    .add-btn.disabled,
+    .add-btn:disabled {
+      background: #e2dfeb !important;
+      color: #9c97a8 !important;
+      cursor: not-allowed !important;
+      pointer-events: none !important;
+      box-shadow: none !important;
+    }
     .item-emoji {
-      font-size: clamp(28px, 4vw, 40px);
-      margin-bottom: 6px;
-      line-height: 1;
+      display: none;
     }
     .item-name {
       font-weight: 700;
@@ -589,6 +711,24 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .item-recipe {
+      font-size: clamp(9.5px, 1vw, 11px);
+      color: var(--primary);
+      background: var(--primary-bg);
+      padding: 3px 7px;
+      border-radius: 6px;
+      margin-top: 4px;
+      margin-bottom: 4px;
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      border: 1px dashed rgba(137, 87, 204, 0.25);
+    }
+    .item-recipe strong {
+      font-weight: 700;
     }
     .card-spacer {
       flex: 1;
@@ -693,13 +833,25 @@
       box-shadow: 0 4px 16px rgba(30, 27, 46, 0.04);
       border: 1px solid rgba(0,0,0,0.04);
     }
-    .ci-emoji {
+    .ci-img-wrap {
       width: clamp(44px, 5.5vw, 54px);
       height: clamp(44px, 5.5vw, 54px);
       flex-shrink: 0;
-      background: var(--bg); border-radius: 14px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: clamp(22px, 2.8vw, 30px);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--primary-bg);
+      border: 1px solid rgba(0,0,0,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ci-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .ci-emoji {
+      display: none;
     }
     .ci-info { flex: 1; min-width: 0; }
     .ci-name  {
@@ -1015,13 +1167,27 @@
       font-weight: 500;
     }
 
-    .modal-emoji {
-      width: clamp(64px, 9vw, 76px);
-      height: clamp(64px, 9vw, 76px);
-      background: var(--bg); border-radius: 20px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: clamp(32px, 4.5vw, 38px);
+    .modal-img-wrap {
+      width: clamp(80px, 12vw, 100px);
+      height: clamp(80px, 12vw, 100px);
+      border-radius: 20px;
+      overflow: hidden;
+      background: var(--primary-bg);
+      border: 1px solid rgba(0,0,0,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
       margin: 0 auto 14px;
+      position: relative;
+      box-shadow: 0 4px 14px rgba(137,87,204,0.12);
+    }
+    .modal-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .modal-emoji {
+      display: none;
     }
     .modal-price {
       font-size: clamp(15px, 1.8vw, 17px);
@@ -1154,7 +1320,24 @@
       box-shadow: 0 8px 24px rgba(137,87,204,0.18);
     }
     .quiz-rec-card:active { transform: scale(0.96); }
-    .quiz-rec-emoji { font-size: 36px; margin-bottom: 6px; }
+    .quiz-rec-img-wrap {
+      width: 100%;
+      height: 90px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--primary-bg);
+      border: 1px solid rgba(0,0,0,0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 8px;
+    }
+    .quiz-rec-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .quiz-rec-emoji { display: none; }
     .quiz-rec-name { font-size: 13px; font-weight: 800; color: var(--text); line-height: 1.25; margin-bottom: 4px; }
     .quiz-rec-price { font-size: 13px; font-weight: 800; color: var(--primary); margin-top: auto; padding-top: 6px; }
     .quiz-rec-btn {
@@ -1181,28 +1364,62 @@
     }
 
     /* ══════════════════════════════
-       MODAL ADD-ONS (1-Column Layout)
+       MODAL ADD-ONS (Strictly Vertical Layout)
     ══════════════════════════════ */
-    .addon-section { text-align: left; margin-bottom: 16px; background: var(--bg); padding: 12px; border-radius: 16px; }
+    .addon-section {
+      text-align: left;
+      margin-bottom: 16px;
+      background: var(--bg);
+      padding: 12px;
+      border-radius: 16px;
+      overflow-x: hidden;
+      width: 100%;
+      box-sizing: border-box;
+    }
     .addon-label { font-size: 12px; font-weight: 800; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
     .addon-options { display: flex; gap: 8px; flex-wrap: wrap; }
     #modal-addon-options {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      display: flex !important;
+      flex-direction: column !important;
+      flex-wrap: nowrap !important;
+      gap: 8px !important;
       max-height: 250px;
-      overflow-y: auto;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
       padding-right: 4px;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      -webkit-overflow-scrolling: touch;
+    }
+    #modal-addon-options::-webkit-scrollbar {
+      width: 5px;
+    }
+    #modal-addon-options::-webkit-scrollbar-thumb {
+      background: rgba(137, 87, 204, 0.25);
+      border-radius: 10px;
+    }
+    #modal-addon-options .addon-row-wrapper {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 6px !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      flex-shrink: 0 !important;
     }
     #modal-addon-options .addon-btn {
-      width: 100%;
-      flex: none;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      text-align: left;
-      padding: 12px 14px;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      flex: none !important;
+      display: flex !important;
+      justify-content: space-between !important;
+      align-items: center !important;
+      text-align: left !important;
+      padding: 12px 14px !important;
       min-height: 44px;
+      white-space: normal !important;
+      word-break: break-word;
     }
     .addon-btn {
       flex: 1; padding: 12px 12px; border-radius: 12px; font-size: 13px; font-weight: 600;
