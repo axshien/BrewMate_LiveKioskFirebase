@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>ChillVentoryx Kiosk — Responsive Ordering System</title>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=997">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+  <link rel="stylesheet" href="style.css?v=1002">
 </head>
 <body>
 
@@ -47,8 +48,7 @@
         </div>
       </div>
       
-      <div class="promo-slideshow" id="promoSlideshow">
-        </div>
+      <div class="promo-slideshow" id="promoSlideshow"></div>
     </div>
 
     <!-- Pills -->
@@ -70,23 +70,19 @@
       </div>
     </div>
     <div id="featuredHeader" class="section-hd filterable-title" data-category="espresso" style="margin-top: 16px;">
-      <h3>🔥 Featured</h3><span class="badge">Best Seller</span>
+      <h3>🔥 Top Selling</h3><span class="badge">Best Seller</span>
     </div>
     <div class="featured-card filterable-item" id="featCard" data-category="espresso"
-         data-name="Café Latte" data-emoji="☕" data-price="110" data-desc="Best Selling Café"
-         data-recipe="Espresso Shot, Steamed Milk, Light Milk Foam" data-uid="1000101" data-cal="150"
          style="position: relative; flex-direction: column; align-items: stretch; gap: 0;">      
-      <div class="promo-badge b1t1">B1T1</div>
-      <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 12px;">
-        <div class="feat-emoji">☕</div>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div class="feat-emoji" id="featEmoji">☕</div>
         <div class="feat-info">
-          <div class="feat-name">Café Latte</div>
-          <div class="feat-desc">Best Selling Café</div>
-          <div class="feat-price">₱110</div>
+          <div class="feat-name" id="featName">Loading top seller...</div>
+          <div class="feat-desc" id="featDesc"></div>
+          <div class="feat-price" id="featPrice"></div>
         </div>
         <button class="add-btn" id="featAddBtn">+</button>
       </div>     
-      <div class="promo-banner" style="margin: 0 -16px -16px -16px; background: #e0f2eb;">🎁 Buy 1 Get 1 Free - 16oz included</div>
     </div>
 
     <div class="section-hd filterable-title" data-category="espresso"><h3>☕ Espresso</h3></div>
@@ -115,6 +111,12 @@
 
     <div class="section-hd filterable-title" data-category="snacks"><h3>🍟 Snacks</h3></div>
     <div class="items-grid filterable-item" data-category="snacks" id="snacksGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="silog"><h3>🍳 Silog Meals</h3></div>
+    <div class="items-grid filterable-item" data-category="silog" id="silogGrid"></div>
+
+    <div class="section-hd filterable-title" data-category="pasta"><h3>🍝 Pasta</h3></div>
+    <div class="items-grid filterable-item" data-category="pasta" id="pastaGrid"></div>
   </div>
 </div>
 
@@ -138,6 +140,12 @@
       <div class="notes-card" style="margin-bottom: 14px;">
         <div class="notes-label">Nickname for Cup <span style="color: #e74c3c;">*</span></div>
         <input type="text" id="customerNickname" class="nickname-input" placeholder="Enter name (required)" autocomplete="off" maxlength="15" oninput="checkOrderValidation()" />
+      </div>
+
+      <div class="notes-card" style="margin-bottom: 14px;">
+        <div class="notes-label">Email for Digital Receipt (Optional)</div>
+        <input type="email" id="customerEmail" class="nickname-input" placeholder="e.g. name@example.com" autocomplete="off" />
+        <small style="color: var(--muted); font-size: 11px; margin-top: 4px; display: block;">Enter your email if you'd like a digital receipt sent to you.</small>
       </div>
 
       <div class="notes-card" style="margin-bottom: 14px;">
@@ -203,19 +211,31 @@
 
 <div id="quiz-modal-overlay" class="hidden">
   <div class="quiz-modal-content">
-    <button id="close-quiz-btn" class="close-btn">&times;</button>
+    <button id="close-quiz-btn" class="close-btn" aria-label="Close quiz">&times;</button>
     
     <div class="panel-section">
-        <div class="subtitle">☕ YOUR VIRTUAL BARISTA</div>
-        <h2 id="quiz-question" class="title">What's the vibe today?</h2>
-        <div id="quiz-options" class="button-group"></div>
-        <button id="quiz-reset" class="hidden" style="margin-top: 20px; background: none; border: none; color: rgba(255,255,255,0.7); font-size: 13px; font-family: var(--sans); cursor: pointer; text-decoration: underline; position: relative; z-index: 2;">Start over</button>
-        <div class="bg-graphic"></div>
+      <div class="quiz-badge-wrap">
+        <span class="quiz-step-badge" id="quizStepBadge">Step 1 of 3</span>
+      </div>
+      <div class="subtitle">☕ YOUR VIRTUAL BARISTA</div>
+      <h2 id="quiz-question" class="title">What are you in the mood for?</h2>
+      <p id="quiz-hint" style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: -14px; margin-bottom: 22px;">Let us help find your perfect match ✨</p>
+      
+      <div id="quiz-options" class="button-group"></div>
+      
+      <div class="quiz-nav-row" style="display: flex; gap: 14px; align-items: center; margin-top: 24px; position: relative; z-index: 2;">
+        <button id="quiz-back-btn" class="hidden" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--sans);">← Back</button>
+        <button id="quiz-reset" class="hidden" style="background: none; border: none; color: rgba(255,255,255,0.7); font-size: 12px; font-family: var(--sans); cursor: pointer; text-decoration: underline;">Start over</button>
+      </div>
+      <div class="bg-graphic"></div>
     </div>
 
-    <div id="cravingResultsSection" class="hidden" style="background: var(--bg); padding: 30px; border-radius: 0 0 24px 24px;">
-      <h3 style="font-family: var(--serif); font-size: 20px; color: var(--text); margin-bottom: 16px;">We recommend...</h3>
-      <div id="recommendationContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;"></div>
+    <div id="cravingResultsSection" class="hidden" style="background: var(--bg); padding: 24px 20px; border-radius: 0 0 24px 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-family: var(--serif); font-size: 20px; color: var(--text); margin: 0;">✨ We recommend for you...</h3>
+        <button id="quiz-restart-btn" style="background: var(--primary-bg); color: var(--primary); border: none; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--sans);">↺ Try Again</button>
+      </div>
+      <div id="recommendationContainer" class="quiz-rec-grid"></div>
     </div>
 
   </div>
@@ -224,12 +244,21 @@
 <!-- ══ CONFIRM ══ -->
 <div class="screen" id="confirmScreen">
   <div class="confirm-wrap">
-    <div class="confirm-icon">✓</div>
+    <div class="swal-success-wrapper">
+      <div class="swal2-icon swal2-success swal2-icon-show" id="confirmSuccessIcon" style="display: flex;">
+        <div class="swal2-success-circular-line-left"></div>
+        <span class="swal2-success-line-tip"></span>
+        <span class="swal2-success-line-long"></span>
+        <div class="swal2-success-ring"></div>
+        <div class="swal2-success-fix"></div>
+        <div class="swal2-success-circular-line-right"></div>
+      </div>
+    </div>
     <h2 class="confirm-title">Order Placed!</h2>
     <p class="confirm-sub">Sent to ChillVentory POS</p>
     
     <div class="queue-card">
-      <div class="queue-label">Queue Number</div>
+      <div class="queue-label">Order Number</div>
       <div class="queue-num" id="queueNum">—</div>
     </div>
     
@@ -269,67 +298,54 @@
         <span style="font-size:13px;color:var(--muted);">Amount Due</span>
         <strong style="color:var(--primary);font-size:16px;" id="confirmAmount">₱0</strong>
       </div>
+      <div class="cd-row" id="confirmEmailRow" style="display: none;">
+        <span style="font-size:13px;color:var(--muted);">Digital Receipt</span>
+        <strong id="confirmEmail" style="color:var(--text);font-size:13px;word-break:break-all;">—</strong>
+      </div>
       <div class="cd-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2dff0;">
         <span style="font-size:13px;color:var(--muted);">Status</span>
-        <span class="cd-status">✓ Sent to POS</span>
+        <span class="cd-status" id="confirmStatusText">✓ Sent to POS</span>
       </div>
     </div>
-    <button class="btn-place" id="viewReceiptBtn" style="margin-bottom: 12px; background: var(--text);">📄 View Digital Receipt</button>
-    <button class="btn-outline" id="newOrderBtn">Place another order</button>
+    <button class="btn-place" id="newOrderBtn">Place another order</button>
   </div>
 </div>
 
-<!-- ══ Recommendation ══ -->
+<!-- ══ Product Modal ══ -->
 <div id="confirmation-overlay" class="hidden">
   <div class="modal-box">
+    <button class="modal-close-btn" id="modalCloseBtn" aria-label="Close">&times;</button>
     <div id="modal-uid" style="font-size: 11px; font-weight: 800; color: var(--muted); margin-bottom: 12px; letter-spacing: 1px; text-transform: uppercase;">UID: —</div>
     
     <div class="modal-emoji" id="modal-emoji">☕</div>
     <h3 id="modal-title">Item Name</h3>
-    <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px; margin-bottom:8px;">Description</p>
+    <p id="modal-desc" style="color:var(--muted); font-size:13px; margin-top:4px; margin-bottom:12px; display: none;">Description</p>
     
-    <button id="btn-toggle-recipe" style="background: none; border: none; color: var(--primary); font-size: 12px; font-weight: 700; cursor: pointer; text-decoration: underline; margin-bottom: 16px;">View Ingredients</button>
-    <div id="modal-recipe-content" class="hidden" style="background: var(--bg); padding: 10px; border-radius: 8px; font-size: 12px; color: var(--text); margin-bottom: 16px; text-align: left;">
-      <div style="display:flex; align-items:center; margin-bottom:4px; gap:6px;">
-        <strong style="display:block;">Contains:</strong>
+    <!-- Ingredients directly inside the product modal (clean & elegant) -->
+    <div id="modal-recipe-content" class="modal-ingredients-box">
+      <div class="ingredients-header">
+        <span class="ingredients-label">🌿 Ingredients</span>
         <div class="tooltip-container">
           <span class="info-icon">ⓘ</span>
           <div class="tooltip-text" id="modal-calories-text">Est. 0 kcal</div>
         </div>
       </div>
-      <span id="modal-recipe-text">Espresso, Steamed Milk, Vanilla Syrup</span>
+      <div id="modal-recipe-text" class="ingredients-text">Espresso, Hot Water</div>
     </div>
     
     <div class="size-section" id="modal-size-section">
       <div class="addon-label">Size</div>
-      <div class="addon-options">
+      <div class="addon-options" id="modal-size-options">
         <button class="size-btn active" data-size="16oz">16oz (Standard)</button>
         <button class="size-btn" data-size="22oz" id="btn-upsize">22oz</button>
       </div>
     </div>
 
-    <div class="addon-section">
+    <div class="addon-section" id="modal-addon-section">
       <div class="addon-label">Add-ons</div>
-      <div class="addon-options">
+      <div class="addon-options" id="modal-addon-options">
         <button class="addon-btn active" data-addon="none" data-price="0">None</button>
-        <button class="addon-btn" data-addon="extra-milk" data-price="20">Extra Milk (+₱20)</button>
       </div>
-    </div>
-
-    <div id="modal-promo-section" class="b1t1-container hidden" style="background: #FDEDED; border-color: #FADBD8;">
-      <div style="font-size: 13px; color: #C0392B; font-weight: 700;">🏷️ Claim 20% Promotional Discount</div>
-      <label class="switch">
-        <input type="checkbox" id="promo-opt-in">
-        <span class="slider slider-red"></span>
-      </label>
-    </div>
-
-    <div id="modal-b1t1-section" class="b1t1-container hidden">
-      <div style="font-size: 13px; color: #1CA673; font-weight: 700;">🎁 Claim Buy 1 Take 1 Offer</div>
-      <label class="switch">
-        <input type="checkbox" id="b1t1-opt-in">
-        <span class="slider"></span>
-      </label>
     </div>
 
     <p class="modal-price" style="display: block; width: 100%; text-align: center;">
@@ -354,9 +370,11 @@
 
 <div class="toast" id="toast"></div>
 <div class="peciller-watermark">(Peciller™ build v1.0 xD)</div>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="script.js?v=911"></script>
+<script src="script.js?v=1001"></script>
 </body>
 </html>
