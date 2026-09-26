@@ -6,7 +6,7 @@
   <title>ChillVentoryx Kiosk — Responsive Ordering System</title>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
-  <link rel="stylesheet" href="style.css?v=1002">
+  <link rel="stylesheet" href="style.css?v=1003">
 </head>
 <body>
 
@@ -309,6 +309,7 @@
         <span class="cd-status" id="confirmStatusText">✓ Sent to POS</span>
       </div>
     </div>
+    <button class="btn-view-receipt" id="viewReceiptBtn" type="button">🧾 View Digital Invoice</button>
     <button class="btn-place" id="newOrderBtn">Place another order</button>
   </div>
 </div>
@@ -352,9 +353,19 @@
       </div>
     </div>
 
-    <p class="modal-price" style="display: block; width: 100%; text-align: center;">
-      Total: <span id="modal-price-value" style="color:var(--primary); font-weight:800;">₱0</span>
-    </p>
+    <!-- Product & Addon Separation Price Breakdown Box -->
+    <div class="modal-price-card" id="modal-price-card">
+      <div class="modal-price-row">
+        <span class="modal-price-lbl" id="modal-base-price-lbl">Initial Price:</span>
+        <span class="modal-price-num" id="modal-base-price-val">₱0.00</span>
+      </div>
+      <div id="modal-selected-addons-list" class="modal-selected-addons-list hidden"></div>
+      <div class="modal-price-sep"></div>
+      <div class="modal-price-row modal-price-total-row">
+        <span>Total:</span>
+        <span id="modal-price-value" class="modal-price-total">₱0.00</span>
+      </div>
+    </div>
     
     <div class="modal-actions" style="margin-top: 16px; width: 100%; display: block;">
       <button id="btn-confirm-order" class="btn-place" style="margin-top: 0; padding: 14px; width: 100%;">Add to Order</button>
@@ -363,12 +374,18 @@
 </div>
 
 <div id="receipt-overlay" class="hidden">
-  <div class="receipt-wrapper">
+  <div class="receipt-wrapper" style="position: relative;">
+    <button id="receiptCloseBtn" class="modal-close-btn" style="top: -12px; right: -12px; background: white; color: #333; box-shadow: 0 4px 12px rgba(0,0,0,0.2);" aria-label="Close">&times;</button>
     <div class="receipt-paper" id="receipt-paper">
-      </div>
-    <button id="btn-download-pdf" class="btn-place" style="margin-top: 24px; background: #333; box-shadow: 0 8px 20px rgba(0,0,0,0.2);">
-      ⬇ Download as PDF
-    </button>
+    </div>
+    <div style="display: flex; gap: 10px; margin-top: 16px; width: 100%;">
+      <button id="btn-download-pdf" class="btn-place" style="flex: 1; margin: 0; padding: 12px; background: #333; font-size: 13px;">
+        ⬇ Download PDF
+      </button>
+      <button id="btnCloseReceiptModal" class="btn-place" style="flex: 1; margin: 0; padding: 12px; background: var(--muted); font-size: 13px;">
+        Close
+      </button>
+    </div>
   </div>
 </div>
 
@@ -379,6 +396,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="script.js?v=1001"></script>
+<script src="script.js?v=1004"></script>
 </body>
 </html>

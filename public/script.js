@@ -21,16 +21,30 @@ const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE
 
 // Product image helper using Supabase imageUrl with reliable fallbacks
 function getProductImage(item) {
-  if (item && item.imageUrl && typeof item.imageUrl === 'string' && item.imageUrl.trim() !== '') {
-    const url = item.imageUrl.trim();
+  if (!item) return 'placeholder.svg';
+  const rawUrl = item.imageUrl || item.image || item.productImage || item.img || item.image_url;
+  if (rawUrl && typeof rawUrl === 'string' && rawUrl.trim() !== '') {
+    const url = rawUrl.trim();
     if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
       return url;
     }
     if (url.startsWith('/storage/') || url.startsWith('storage/')) {
       return `${SUPABASE_URL}/${url.replace(/^\//, '')}`;
     }
+    if (url.startsWith('product-images/') || url.startsWith('/product-images/')) {
+      return `${SUPABASE_URL}/storage/v1/object/public/${url.replace(/^\//, '')}`;
+    }
+    // Handle local Android device cache paths saved from mobile inventory app
     if (url.startsWith('/data/') || url.startsWith('/storage/emulated/') || url.startsWith('file://')) {
+      const fileName = url.split(/[\\/]/).pop();
+      if (fileName && fileName.length > 3) {
+        return `${SUPABASE_URL}/storage/v1/object/public/product-images/${fileName}`;
+      }
       return 'placeholder.svg';
+    }
+    // Plain filename (e.g. "1000071441.png" or "croffle.jpg")
+    if (url.includes('.')) {
+      return `${SUPABASE_URL}/storage/v1/object/public/product-images/${url.replace(/^\//, '')}`;
     }
     return url;
   }
@@ -43,20 +57,18 @@ function buildPromoMap(promotions, promoProducts) {
   PROMO_PRODUCT_IDS = {};
   const now = new Date();
 
-  promotions.forEach(promo => {
-    if (!promo.isActive) return;
+  (promotions || []).forEach(promo => {
+    const isActive = promo.isActive === 1 || promo.isActive === true || promo.isActive === '1' || promo.is_active === 1 || promo.is_active === true;
+    if (!isActive) return;
     // Check date range
     if (promo.startDate && new Date(promo.startDate) > now) return;
     if (promo.endDate && new Date(promo.endDate) < now) return;
 
-    promoProducts.forEach(pp => {
-      if (Number(pp.promotionid) !== Number(promo.promotionId)) return;
-      if (!pp.enabled) return;
-      const pId = Number(pp.productid);
-      // Keep the best (highest) discount if multiple promos apply
+    const discountPct = promo.discountType === 1 ? Number(promo.discountValue) : 0; // type 1 = percentage
+    const discountFlat = promo.discountType === 2 ? Number(promo.discountValue) : 0; // type 2 = fixed
+
+    const addPromoForProduct = (pId) => {
       const existing = PROMO_PRODUCT_IDS[pId];
-      const discountPct = promo.discountType === 1 ? Number(promo.discountValue) : 0; // type 1 = percentage
-      const discountFlat = promo.discountType === 2 ? Number(promo.discountValue) : 0; // type 2 = fixed
       if (!existing || discountPct > (existing.discountPct || 0) || discountFlat > (existing.discountFlat || 0)) {
         PROMO_PRODUCT_IDS[pId] = {
           promotionId: promo.promotionId,
@@ -67,7 +79,22 @@ function buildPromoMap(promotions, promoProducts) {
           discountFlat
         };
       }
-    });
+    };
+
+    if (promoProducts && promoProducts.length > 0) {
+      promoProducts.forEach(pp => {
+        if (Number(pp.promotionid || pp.promotionId) !== Number(promo.promotionId)) return;
+        const isEnabled = pp.enabled === 1 || pp.enabled === true || pp.enabled === '1' || pp.enable === 1;
+        if (!isEnabled) return;
+        const pId = Number(pp.productid || pp.productId);
+        if (pId) addPromoForProduct(pId);
+      });
+    }
+
+    if (promo.targetIds && typeof promo.targetIds === 'string') {
+      const ids = promo.targetIds.split(',').map(s => Number(s.trim())).filter(n => !isNaN(n) && n > 0);
+      ids.forEach(pId => addPromoForProduct(pId));
+    }
   });
 }
 
@@ -158,21 +185,9 @@ function updateCardStockUI(item) {
       if (badge) badge.remove();
     }
 
-    // Dynamic recipe display on card
-    let recipeEl = card.querySelector('.item-recipe');
-    if (item.recipe) {
-      if (!recipeEl) {
-        recipeEl = document.createElement('div');
-        recipeEl.className = 'item-recipe';
-        const spacer = card.querySelector('.card-spacer');
-        if (spacer && spacer.parentNode) {
-          spacer.parentNode.insertBefore(recipeEl, spacer);
-        } else {
-          card.appendChild(recipeEl);
-        }
-      }
-      recipeEl.innerHTML = `<strong>Ingredients:</strong> ${item.recipe}`;
-    } else if (recipeEl) {
+    // Ingredients should NOT be on the menu item card (they are inside the modal)
+    const recipeEl = card.querySelector('.item-recipe');
+    if (recipeEl) {
       recipeEl.remove();
     }
 
@@ -582,7 +597,7 @@ async function loadMenuFromSupabase() {
           maxPrice,
           basePrice: minPrice,
           price: hasDirectPrice ? rawPrice : minPrice,
-          imageUrl: item.imageUrl || '',
+          imageUrl: (item.imageUrl || item.image || item.productImage || item.img || item.image_url || '').trim(),
           isOutOfStock: stockStatus.isOutOfStock,
           outOfStockReason: stockStatus.reason,
           promo: null,
@@ -818,21 +833,22 @@ function makeCard(item) {
 
   // Build price HTML with promo support
   let priceHTML = '';
+  const hasPromo = !!item.promo;
   if (item.hasSizes && item.sizes && item.sizes.length > 0) {
-    if (item.promo) {
+    if (hasPromo) {
       const dispMin = item.promoMinPrice;
       const dispMax = item.promoMaxPrice;
-      priceHTML = dispMin !== dispMax
-        ? `<span class="price-original">₱${item.minPrice}–₱${item.maxPrice}</span> <span class="price-promo">₱${dispMin}–₱${dispMax}</span>`
-        : `<span class="price-original">₱${item.minPrice}</span> <span class="price-promo">₱${dispMin}</span>`;
+      const origRange = item.minPrice !== item.maxPrice ? `₱${item.minPrice}–₱${item.maxPrice}` : `₱${item.minPrice}`;
+      const promoRange = dispMin !== dispMax ? `₱${dispMin}–₱${dispMax}` : `₱${dispMin}`;
+      priceHTML = `<span class="price-original">${origRange}</span><span class="price-promo">${promoRange}</span>`;
     } else {
       priceHTML = item.minPrice !== item.maxPrice
         ? `₱${item.minPrice} - ₱${item.maxPrice}`
         : `₱${item.minPrice}`;
     }
   } else {
-    if (item.promo) {
-      priceHTML = `<span class="price-original">₱${item.price || 0}</span> <span class="price-promo">₱${item.promoPrice}</span>`;
+    if (hasPromo) {
+      priceHTML = `<span class="price-original">₱${item.price || 0}</span><span class="price-promo">₱${item.promoPrice}</span>`;
     } else {
       priceHTML = `₱${item.price || 0}`;
     }
@@ -859,11 +875,10 @@ function makeCard(item) {
     </div>
     <div class="item-name">${itemName}</div>
     ${cleanDesc ? `<div class="item-desc">${cleanDesc}</div>` : ''}
-    ${item.recipe ? `<div class="item-recipe"><strong>Ingredients:</strong> ${item.recipe}</div>` : ''}
     <div class="card-spacer"></div>
     ${sizePillsHTML2}
-    <div class="card-footer">
-      <div class="item-price">${priceHTML}</div>
+    <div class="card-footer ${hasPromo ? 'has-promo' : ''}">
+      <div class="item-price ${hasPromo ? 'has-promo' : ''}">${priceHTML}</div>
       ${addBtnHTML}
     </div>
   `;
@@ -922,9 +937,14 @@ function goTo(id) {
   if (id === 'menuScreen') refreshInventoryStock();
 }
 
-function addItem(name, imageUrl, price, desc) {
+function addItem(name, imageUrl, price, desc, details = {}) {
   const isPromoItem = name.includes('[-20%') || name.includes('B1T1 Claimed');
-  const ex = cart.find(i => i.name === name);
+  
+  // Signature based on displayName and selected addons to allow grouping identical items
+  const addonKey = (details.addons || []).map(a => `${a.addonsId}_${a.subSelection || ''}`).sort().join(';');
+  const itemKey = `${details.displayName || name}__${addonKey}`;
+
+  const ex = cart.find(i => (i.itemKey && i.itemKey === itemKey) || i.name === name);
   
   if (ex) {
     if (isPromoItem) {
@@ -933,11 +953,24 @@ function addItem(name, imageUrl, price, desc) {
     }
     ex.qty++;
   } else {
-    cart.push({ name, imageUrl: imageUrl || 'placeholder.svg', price, desc, qty: 1 });
+    cart.push({
+      itemKey: itemKey,
+      name: name,
+      displayName: details.displayName || name,
+      imageUrl: imageUrl || 'placeholder.svg',
+      initialPrice: details.initialPrice != null ? Number(details.initialPrice) : Number(price),
+      originalBasePrice: details.originalBasePrice != null ? Number(details.originalBasePrice) : Number(price),
+      promo: details.promo || null,
+      addons: details.addons || [],
+      addonTotal: details.addonTotal || 0,
+      price: Number(price), // Unit Total = initialPrice + addonTotal
+      desc: desc,
+      qty: 1
+    });
   }
   syncUI();
   if (cur === 'cartScreen') renderCart(); 
-  showToast('Added: ' + name);
+  showToast('Added: ' + (details.displayName || name));
 }
 
 function changeQty(idx, delta) {
@@ -962,14 +995,38 @@ function renderCart() {
     con.innerHTML = cart.length === 0
       ? `<div class="empty-state"><div class="empty-icon">🛒</div><p>Your cart is empty</p></div>`
       : cart.map((item, idx) => {
+          const hasAddons = item.addons && item.addons.length > 0;
+          const initialPrice = Number(item.initialPrice != null ? item.initialPrice : item.price);
+          const lineTotal = item.price * item.qty;
+
+          const addonsHtml = hasAddons ? `
+            <div class="ci-addons-list">
+              ${item.addons.map(a => `
+                <div class="ci-addon-row">
+                  <span class="ci-addon-bullet">•</span>
+                  <span class="ci-addon-name">${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+                  <span class="ci-addon-price">+₱${Number(a.price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : '';
+
           return `
           <div class="cart-item">
             <div class="ci-img-wrap">
-              <img class="ci-img" src="${item.imageUrl || 'placeholder.svg'}" alt="${item.name}" onerror="this.onerror=null;this.src='placeholder.svg';" />
+              <img class="ci-img" src="${item.imageUrl || 'placeholder.svg'}" alt="${item.displayName || item.name}" onerror="this.onerror=null;this.src='placeholder.svg';" />
             </div>
             <div class="ci-info">
-              <div class="ci-name">${item.name}</div>
-              <div class="ci-price">₱${(item.price*item.qty).toLocaleString()}</div>
+              <div class="ci-name">${item.displayName || item.name}</div>
+              <div class="ci-initial-price">
+                <span class="ci-initial-lbl">Initial Price:</span>
+                <span class="ci-initial-val">₱${initialPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+              </div>
+              ${addonsHtml}
+              <div class="ci-line-total">
+                <span class="ci-total-lbl">Total:</span>
+                <span class="ci-price">₱${lineTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+              </div>
             </div>
             <div class="qty-ctrl">
               <button class="qty-btn" onclick="changeQty(${idx},-1)">−</button>
@@ -980,7 +1037,7 @@ function renderCart() {
         }).join('');
   }
 
-  const fmt = '₱' + total.toLocaleString();
+  const fmt = '₱' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
   const subEl = document.getElementById('cartSubtotal');
   const totEl = document.getElementById('cartTotal');
   if (subEl) subEl.textContent = fmt;
@@ -1100,10 +1157,16 @@ async function placeOrder() {
   const orderNumber = getUniqueRandomOrderNumber();
 
   // 2. Prepare payload & sync to Supabase in background (non-blocking)
+  // Saves the email entered by user in chill_kiosk_queue (customerEmail / email column)
   const kioskPayload = {
     kioskordernumber: String(orderNumber),
+    customerEmail: emailInput || null,
     items: cart.map(item => ({
       name: item.name,
+      displayName: item.displayName || item.name,
+      initialPrice: item.initialPrice != null ? Number(item.initialPrice) : Number(item.price),
+      addons: item.addons || [],
+      addonTotal: item.addonTotal || 0,
       price: item.price,
       qty: item.qty,
       imageUrl: item.imageUrl || '',
@@ -1120,8 +1183,21 @@ async function placeOrder() {
     db.from('chill_kiosk_queue')
       .insert([kioskPayload])
       .then(({ data, error }) => {
-        if (error) console.error('Failed to insert to chill_kiosk_queue:', error);
-        else console.log('Order recorded in chill_kiosk_queue:', data);
+        if (error) {
+          // If customerEmail is named email in this database version, fallback gracefully
+          if (error.message && (error.message.includes('customerEmail') || error.code === '42703')) {
+            const fallbackPayload = { ...kioskPayload };
+            delete fallbackPayload.customerEmail;
+            fallbackPayload.email = emailInput || null;
+            return db.from('chill_kiosk_queue').insert([fallbackPayload]);
+          }
+          console.error('Failed to insert to chill_kiosk_queue:', error);
+        } else {
+          console.log('Order recorded in chill_kiosk_queue:', data);
+        }
+      })
+      .then(res => {
+        if (res && res.error) console.error('Fallback insert failed:', res.error);
       })
       .catch(err => console.error('Exception inserting to chill_kiosk_queue:', err));
   }
@@ -1142,6 +1218,9 @@ async function placeOrder() {
   document.getElementById('confirmOrderType').textContent = currentOrderType;
   document.getElementById('confirmAmount').textContent = '₱' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
+  // Automatically render digital receipt so it's ready when user clicks "View Digital Receipt"
+  generateDigitalReceipt(finalNickname, invoiceString, dateStr, timeStr, total, count, 0, total);
+
   const confirmEmailRow = document.getElementById('confirmEmailRow');
   const confirmEmailEl = document.getElementById('confirmEmail');
   const confirmStatusText = document.getElementById('confirmStatusText');
@@ -1156,14 +1235,45 @@ async function placeOrder() {
     }
   }
 
+  // Invoice Items Breakdown: Product initial price, separated addons, and line computation
   const itemsListContainer = document.getElementById('confirm-items-list');
   if (itemsListContainer) {
-    itemsListContainer.innerHTML = cart.map(item => `
-      <div style="display: flex; justify-content: space-between; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px dashed #ddd9ee;">
-        <span style="flex:1; text-align:left; font-weight: 600;">${item.qty}x ${item.name}</span>
-        <span>₱${(item.price * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-      </div>
-    `).join('');
+    itemsListContainer.innerHTML = cart.map(item => {
+      const hasAddons = item.addons && item.addons.length > 0;
+      const initialPrice = Number(item.initialPrice != null ? item.initialPrice : item.price);
+      const initialPriceAmt = (initialPrice * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      const itemTotalAmt = (item.price * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+      let addonsHtml = '';
+      if (hasAddons) {
+        addonsHtml = item.addons.map(a => {
+          const aPrice = Number(a.price) || 0;
+          const aTotal = (aPrice * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+          return `
+            <div style="display: flex; justify-content: space-between; padding-left: 14px; font-size: 11.5px; color: var(--muted); margin-top: 2px;">
+              <span>+ ${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+              <span>₱${aTotal}</span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      return `
+        <div style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #ddd9ee;">
+          <div style="display: flex; justify-content: space-between; font-weight: 600;">
+            <span style="flex:1; text-align:left;">${item.qty}x ${item.displayName || item.name}</span>
+            <span>₱${initialPriceAmt}</span>
+          </div>
+          ${addonsHtml}
+          ${hasAddons ? `
+            <div style="display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; font-weight: 700; color: var(--primary);">
+              <span>Item Total:</span>
+              <span>₱${itemTotalAmt}</span>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
     itemsListContainer.classList.add('hidden');
   }
   
@@ -1218,6 +1328,7 @@ function newOrder() {
   if (email) email.value = '';
   syncUI();
   updateCartInputsState();
+  if (receiptOverlay) receiptOverlay.classList.add('hidden');
   goTo('menuScreen');
 }
 
@@ -1385,13 +1496,45 @@ function updateModalPrice() {
   const discountedBase = promo ? applyPromo(basePrice, promo) : basePrice;
   const finalPrice = discountedBase + addonTotal;
 
+  // 1. Initial product price display
+  const baseLblEl = document.getElementById('modal-base-price-lbl');
+  const baseValEl = document.getElementById('modal-base-price-val');
+  if (baseLblEl) {
+    baseLblEl.textContent = currentSelectedSize ? `Initial Price (${currentSelectedSize.sizeName}):` : 'Initial Price:';
+  }
+  if (baseValEl) {
+    if (promo) {
+      baseValEl.innerHTML = `<span style="text-decoration:line-through;color:var(--muted);font-size:0.85em;margin-right:4px;">₱${basePrice.toFixed(2)}</span> <span style="color:var(--promo-color,#E53935);font-weight:700;">₱${discountedBase.toFixed(2)}</span>`;
+    } else {
+      baseValEl.textContent = '₱' + basePrice.toFixed(2);
+    }
+  }
+
+  // 2. Selected Addons breakdown (showing addon name and separate price)
+  const addonsListEl = document.getElementById('modal-selected-addons-list');
+  if (addonsListEl) {
+    if (selectedAddons.length > 0) {
+      addonsListEl.classList.remove('hidden');
+      addonsListEl.innerHTML = selectedAddons.map(a => `
+        <div class="modal-addon-breakdown-row">
+          <span>+ ${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+          <span>₱${Number(a.price).toFixed(2)}</span>
+        </div>
+      `).join('');
+    } else {
+      addonsListEl.classList.add('hidden');
+      addonsListEl.innerHTML = '';
+    }
+  }
+
+  // 3. Computed Total
   const priceValEl = document.getElementById('modal-price-value');
   if (priceValEl) {
     if (promo) {
       const originalTotal = basePrice + addonTotal;
-      priceValEl.innerHTML = `<span style="text-decoration:line-through;color:var(--muted);font-size:0.85em;font-weight:600;">₱${originalTotal}</span> <span style="color:var(--promo-color,#E53935);font-weight:800;">₱${finalPrice}</span>`;
+      priceValEl.innerHTML = `<span style="text-decoration:line-through;color:var(--muted);font-size:0.85em;font-weight:600;">₱${originalTotal.toFixed(2)}</span> <span style="color:var(--promo-color,#E53935);font-weight:800;">₱${finalPrice.toFixed(2)}</span>`;
     } else {
-      priceValEl.textContent = '₱' + finalPrice;
+      priceValEl.textContent = '₱' + finalPrice.toFixed(2);
     }
   }
 }
@@ -1652,34 +1795,43 @@ if (confirmOrderBtn) {
         showToast('Sorry, this item is out of stock', 'warning');
         return;
       }
-      let finalName = itemPendingConfirmation.productName || itemPendingConfirmation.name;
+      
+      const rawName = itemPendingConfirmation.productName || itemPendingConfirmation.name;
+      const sizeLabel = currentSelectedSize ? ` (${currentSelectedSize.sizeName})` : '';
+      const displayName = `${rawName}${sizeLabel}`;
+      
       const basePrice = currentSelectedSize ? currentSelectedSize.price : (Number(itemPendingConfirmation.price || itemPendingConfirmation.minPrice || 0));
-      const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
-
-      // Apply promo discount if applicable
       const promo = itemPendingConfirmation.promo || null;
       const discountedBase = promo ? applyPromo(basePrice, promo) : basePrice;
-      const cartTotal = discountedBase + addonTotal;
+      const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+      const cartUnitTotal = discountedBase + addonTotal;
 
-      if (currentSelectedSize) {
-        finalName += ` (${currentSelectedSize.sizeName})`;
-      }
+      const addonsCopy = selectedAddons.map(a => ({
+        addonsId: a.addonsId,
+        addonsName: a.addonsName,
+        price: Number(a.price) || 0,
+        subSelection: a.subSelection || null
+      }));
 
-      if (selectedAddons.length > 0) {
-        const addonNames = selectedAddons.map(a => {
-          if (a.subSelection) {
-            return `${a.addonsName} (${a.subSelection})`;
-          }
-          return a.addonsName;
-        }).join(', ');
+      // Full legacy fallback name
+      let finalName = displayName;
+      if (addonsCopy.length > 0) {
+        const addonNames = addonsCopy.map(a => a.subSelection ? `${a.addonsName} (${a.subSelection})` : a.addonsName).join(', ');
         finalName += ` [+ ${addonNames}]`;
       }
-
       if (promo) {
         finalName += ` [${promo.discountType === 1 ? `-${promo.discountValue}%` : `-₱${promo.discountValue}`} ${promo.promotionName}]`;
       }
-      
-      addItem(finalName, getProductImage(itemPendingConfirmation), cartTotal, itemPendingConfirmation.description || itemPendingConfirmation.desc);
+
+      addItem(finalName, getProductImage(itemPendingConfirmation), cartUnitTotal, itemPendingConfirmation.description || itemPendingConfirmation.desc, {
+        displayName: displayName,
+        initialPrice: discountedBase,
+        originalBasePrice: basePrice,
+        promo: promo,
+        addons: addonsCopy,
+        addonTotal: addonTotal
+      });
+
       if (confirmationOverlay) confirmationOverlay.classList.add('hidden');
       itemPendingConfirmation = null;
     }
@@ -1709,6 +1861,41 @@ if (viewReceiptBtn) {
   });
 }
 
+const receiptCloseBtn = document.getElementById('receiptCloseBtn');
+if (receiptCloseBtn) {
+  receiptCloseBtn.addEventListener('click', () => {
+    if (receiptOverlay) receiptOverlay.classList.add('hidden');
+  });
+}
+
+const btnCloseReceiptModal = document.getElementById('btnCloseReceiptModal');
+if (btnCloseReceiptModal) {
+  btnCloseReceiptModal.addEventListener('click', () => {
+    if (receiptOverlay) receiptOverlay.classList.add('hidden');
+  });
+}
+
+const btnDownloadPdf = document.getElementById('btn-download-pdf');
+if (btnDownloadPdf) {
+  btnDownloadPdf.addEventListener('click', () => {
+    const paper = document.getElementById('receipt-paper');
+    if (!paper) return;
+    if (typeof html2pdf === 'function') {
+      const qNum = document.getElementById('queueNum')?.textContent || 'Order';
+      const opt = {
+        margin: 8,
+        filename: `Chilltop-Receipt-${qNum}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a6', orientation: 'portrait' }
+      };
+      html2pdf().set(opt).from(paper).save();
+    } else {
+      window.print();
+    }
+  });
+}
+
 // Featured Card Binding (Top Selling Product)
 const fc = document.getElementById('featCard');
 if (fc) {
@@ -1732,14 +1919,41 @@ function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotal
 
   let itemsHTML = '';
   cart.forEach(item => {
+    const hasAddons = item.addons && item.addons.length > 0;
+    const initialPrice = Number(item.initialPrice != null ? item.initialPrice : item.price);
+    const initialAmt = initialPrice * item.qty;
+    const itemTotal = Number(item.price) * item.qty;
+
+    // 1. Initial product line with initial price (NOT bundled with addons)
     itemsHTML += `
-      <div class="receipt-item-row" style="margin-bottom: 2px;"><div style="flex:1;">${item.name}</div></div>
-      <div class="receipt-item-row">
+      <div class="receipt-item-row" style="margin-top: 6px; font-weight: 700;">
          <div class="receipt-item-qty">${item.qty}</div>
-         <div class="receipt-item-name"></div>
-         <div class="receipt-item-price">P${item.price.toFixed(2)}</div>
-         <div class="receipt-item-amt">P${(item.price * item.qty).toFixed(2)}</div>
+         <div class="receipt-item-name">${item.displayName || item.name}</div>
+         <div class="receipt-item-price">P${initialPrice.toFixed(2)}</div>
+         <div class="receipt-item-amt">P${initialAmt.toFixed(2)}</div>
       </div>`;
+
+    // 2. Under it, display each addon and its price (separated, clearly visible)
+    if (hasAddons) {
+      item.addons.forEach(a => {
+        const aPrice = Number(a.price) || 0;
+        const aAmt = aPrice * item.qty;
+        itemsHTML += `
+          <div class="receipt-item-row receipt-addon-row" style="font-size: 11px; color: #444;">
+             <div class="receipt-item-qty"></div>
+             <div class="receipt-item-name" style="padding-left: 10px;">+ ${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</div>
+             <div class="receipt-item-price" style="color: #666;">P${aPrice.toFixed(2)}</div>
+             <div class="receipt-item-amt" style="color: #444;">P${aAmt.toFixed(2)}</div>
+          </div>`;
+      });
+
+      // Item total calculation row
+      itemsHTML += `
+        <div class="receipt-item-row receipt-sub-total" style="font-size: 11px; color: #666; justify-content: flex-end; gap: 10px; margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px dotted #ccc;">
+          <span>Item Total:</span>
+          <span style="font-weight: 700; color: #111;">P${itemTotal.toFixed(2)}</span>
+        </div>`;
+    }
   });
 
   paper.innerHTML = `
@@ -1754,13 +1968,13 @@ function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotal
       <div>Receipt No: ${invoiceNum}</div>
       <div>Date: ${dateStr} &nbsp; Time: ${timeStr}</div>
     </div>
-    <div class="receipt-flex" style="font-weight: bold; margin-bottom: 8px;">
+    <div class="receipt-flex" style="font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">
       <div>Qty Item</div><div style="display:flex; gap: 20px;"><span>Price</span><span>Amt</span></div>
     </div>
     ${itemsHTML}
     <div class="receipt-dashed"></div>
-    <div class="receipt-flex"><div>Items: ${cart.length}</div><div>Subtotal: &nbsp;P${subtotalAmount.toFixed(2)}</div></div>
-    <div style="margin-bottom: 12px;">Qty: ${totalCount}</div>
+    <div class="receipt-flex"><div>Total Items: ${cart.length}</div><div>Subtotal: &nbsp;P${subtotalAmount.toFixed(2)}</div></div>
+    <div style="margin-bottom: 12px; font-size: 12px; color: #555;">Total Qty: ${totalCount}</div>
     <div style="font-size: 14px;">
       <div class="receipt-flex" style="font-weight: 800; font-size: 17px; margin-bottom: 12px;"><div>Total:</div><div>P${typeof finalTotal === 'number' ? finalTotal.toFixed(2) : finalTotal}</div></div>
     </div>
@@ -1854,11 +2068,11 @@ async function loadPromosFromSupabase() {
   if (!db) return;
   try {
     const [promoRes, promoProdRes] = await Promise.all([
-      db.from('chill_promotion').select('*').eq('isActive', 1),
-      db.from('chill_promotion_product').select('*').eq('enabled', 1)
+      db.from('chill_promotion').select('*'),
+      db.from('chill_promotion_product').select('*')
     ]);
     if (!promoRes.error && promoRes.data) {
-      ALL_PROMOTIONS = promoRes.data;
+      ALL_PROMOTIONS = promoRes.data.filter(p => p.isActive === 1 || p.isActive === true || p.isActive === '1' || p.is_active === 1 || p.is_active === true);
       const prodData = (!promoProdRes.error && promoProdRes.data) ? promoProdRes.data : [];
       buildPromoMap(ALL_PROMOTIONS, prodData);
       if (ALL_ITEMS && ALL_ITEMS.length > 0) {
