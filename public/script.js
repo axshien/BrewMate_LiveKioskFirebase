@@ -1160,7 +1160,7 @@ async function placeOrder() {
   // Saves the email entered by user in chill_kiosk_queue (customerEmail / email column)
   const kioskPayload = {
     kioskordernumber: String(orderNumber),
-    customerName: nicknameInput(),
+    customerName: nicknameInput.toUpperCase(),
     customerEmail: emailInput || null,
     orderType: currentOrderType,
     items: cart.map(item => ({
@@ -1208,7 +1208,7 @@ async function placeOrder() {
   const invoiceString = `#INV-${orderNumber}`;
   const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  const finalNickname = nicknameInput();
+  const finalNickname = nicknameInput.toUpperCase();
 
   // Populate Order Details
   document.getElementById('queueNum').textContent = orderNumber;
