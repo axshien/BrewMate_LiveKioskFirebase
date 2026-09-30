@@ -304,6 +304,7 @@ async function refreshInventoryStock() {
             confirmBtn.classList.remove('disabled');
           }
         }
+        if (typeof updateModalQtyUI === 'function') updateModalQtyUI();
       }
     }
   } catch (err) {
@@ -939,6 +940,7 @@ function goTo(id) {
 
 function addItem(name, imageUrl, price, desc, details = {}) {
   const isPromoItem = name.includes('[-20%') || name.includes('B1T1 Claimed');
+  const qtyToAdd = details.qty && Number(details.qty) > 0 ? Number(details.qty) : 1;
   
   // Signature based on displayName and selected addons to allow grouping identical items
   const addonKey = (details.addons || []).map(a => `${a.addonsId}_${a.subSelection || ''}`).sort().join(';');
@@ -951,7 +953,7 @@ function addItem(name, imageUrl, price, desc, details = {}) {
       showToast('Promo limited to 1 per order!');
       return; 
     }
-    ex.qty++;
+    ex.qty += qtyToAdd;
   } else {
     cart.push({
       itemKey: itemKey,
@@ -965,21 +967,34 @@ function addItem(name, imageUrl, price, desc, details = {}) {
       addonTotal: details.addonTotal || 0,
       price: Number(price), // Unit Total = initialPrice + addonTotal
       desc: desc,
-      qty: 1
+      qty: isPromoItem ? 1 : qtyToAdd
     });
   }
   syncUI();
   if (cur === 'cartScreen') renderCart(); 
-  showToast('Added: ' + (details.displayName || name));
+  showToast(`Added: ${qtyToAdd > 1 ? qtyToAdd + 'x ' : ''}${details.displayName || name}`);
 }
 
 function changeQty(idx, delta) {
   if (!cart[idx]) return;
+  if (delta < 0 && cart[idx].qty <= 1) return;
   cart[idx].qty += delta;
-  if (cart[idx].qty <= 0) cart.splice(idx, 1);
   syncUI();
   renderCart();
 }
+
+function removeItem(idx) {
+  if (!cart[idx]) return;
+  const removed = cart.splice(idx, 1)[0];
+  syncUI();
+  renderCart();
+  if (removed) {
+    showToast('Removed: ' + (removed.displayName || removed.name), 'info');
+  }
+}
+
+window.changeQty = changeQty;
+window.removeItem = removeItem;
 
 function syncUI() {
   const count = cart.reduce((s,i) => s + i.qty, 0);
@@ -998,6 +1013,7 @@ function renderCart() {
           const hasAddons = item.addons && item.addons.length > 0;
           const initialPrice = Number(item.initialPrice != null ? item.initialPrice : item.price);
           const lineTotal = item.price * item.qty;
+          const isMinQty = item.qty <= 1;
 
           const addonsHtml = hasAddons ? `
             <div class="ci-addons-list">
@@ -1028,10 +1044,15 @@ function renderCart() {
                 <span class="ci-price">₱${lineTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
               </div>
             </div>
-            <div class="qty-ctrl">
-              <button class="qty-btn" onclick="changeQty(${idx},-1)">−</button>
-              <span class="qty-num">${item.qty}</span>
-              <button class="qty-btn" onclick="changeQty(${idx},1)">+</button>
+            <div class="cart-item-actions">
+              <div class="qty-ctrl">
+                <button class="qty-btn ${isMinQty ? 'disabled' : ''}" onclick="changeQty(${idx},-1)" ${isMinQty ? 'disabled' : ''} aria-label="Decrease quantity">−</button>
+                <span class="qty-num">${item.qty}</span>
+                <button class="qty-btn" onclick="changeQty(${idx},1)" aria-label="Increase quantity">+</button>
+              </div>
+              <button class="cart-remove-btn" onclick="removeItem(${idx})" aria-label="Remove ${item.displayName || item.name}">
+                Remove
+              </button>
             </div>
           </div>`;
         }).join('');
@@ -1479,9 +1500,27 @@ if (menuSearchInput) {
 let itemPendingConfirmation = null;
 let selectedAddons = []; // array of { addonsId, addonsName, price }
 let currentSelectedSize = null; 
+let currentModalQty = 1;
 
 const confirmationOverlay = document.getElementById('confirmation-overlay');
 const receiptOverlay = document.getElementById('receipt-overlay');
+
+function updateModalQtyUI() {
+  const qtyValEl = document.getElementById('modal-qty-val');
+  const minusBtn = document.getElementById('modal-qty-minus');
+  const plusBtn = document.getElementById('modal-qty-plus');
+  if (qtyValEl) qtyValEl.textContent = currentModalQty;
+  if (minusBtn) {
+    const isMin = currentModalQty <= 1 || (itemPendingConfirmation && itemPendingConfirmation.isOutOfStock);
+    minusBtn.disabled = isMin;
+    minusBtn.classList.toggle('disabled', isMin);
+  }
+  if (plusBtn) {
+    const isOOS = !!(itemPendingConfirmation && itemPendingConfirmation.isOutOfStock);
+    plusBtn.disabled = isOOS;
+    plusBtn.classList.toggle('disabled', isOOS);
+  }
+}
 
 function updateModalPrice() {
   if (!itemPendingConfirmation) return;
@@ -1496,7 +1535,8 @@ function updateModalPrice() {
   const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
   const promo = itemPendingConfirmation.promo || null;
   const discountedBase = promo ? applyPromo(basePrice, promo) : basePrice;
-  const finalPrice = discountedBase + addonTotal;
+  const unitPrice = discountedBase + addonTotal;
+  const finalPrice = unitPrice * currentModalQty;
 
   // 1. Initial product price display
   const baseLblEl = document.getElementById('modal-base-price-lbl');
@@ -1530,10 +1570,14 @@ function updateModalPrice() {
   }
 
   // 3. Computed Total
+  const totalLblEl = document.getElementById('modal-total-lbl');
+  if (totalLblEl) {
+    totalLblEl.textContent = currentModalQty > 1 ? `Total (${currentModalQty}x):` : 'Total:';
+  }
   const priceValEl = document.getElementById('modal-price-value');
   if (priceValEl) {
     if (promo) {
-      const originalTotal = basePrice + addonTotal;
+      const originalTotal = (basePrice + addonTotal) * currentModalQty;
       priceValEl.innerHTML = `<span style="text-decoration:line-through;color:var(--muted);font-size:0.85em;font-weight:600;">₱${originalTotal.toFixed(2)}</span> <span style="color:var(--promo-color,#E53935);font-weight:800;">₱${finalPrice.toFixed(2)}</span>`;
     } else {
       priceValEl.textContent = '₱' + finalPrice.toFixed(2);
@@ -1544,6 +1588,7 @@ function updateModalPrice() {
 function triggerConfirmation(item) {
   if (!item) return;
   itemPendingConfirmation = item;
+  currentModalQty = 1;
   
   const itemName = item.productName || item.name || 'Café Latte';
   const cleanDesc = (item.description && item.description.trim() && item.description.trim() !== "''") ? item.description.trim() : '';
@@ -1777,9 +1822,30 @@ function triggerConfirmation(item) {
     }
   }
 
+  updateModalQtyUI();
   updateModalPrice();
   if (confirmationOverlay) confirmationOverlay.classList.remove('hidden');
 } 
+
+const modalQtyMinusBtn = document.getElementById('modal-qty-minus');
+if (modalQtyMinusBtn) {
+  modalQtyMinusBtn.addEventListener('click', () => {
+    if (currentModalQty > 1) {
+      currentModalQty--;
+      updateModalQtyUI();
+      updateModalPrice();
+    }
+  });
+}
+
+const modalQtyPlusBtn = document.getElementById('modal-qty-plus');
+if (modalQtyPlusBtn) {
+  modalQtyPlusBtn.addEventListener('click', () => {
+    currentModalQty++;
+    updateModalQtyUI();
+    updateModalPrice();
+  });
+}
 
 const modalCloseBtn = document.getElementById('modalCloseBtn');
 if (modalCloseBtn) {
@@ -1831,7 +1897,8 @@ if (confirmOrderBtn) {
         originalBasePrice: basePrice,
         promo: promo,
         addons: addonsCopy,
-        addonTotal: addonTotal
+        addonTotal: addonTotal,
+        qty: currentModalQty
       });
 
       if (confirmationOverlay) confirmationOverlay.classList.add('hidden');
