@@ -126,27 +126,154 @@ function applyPromoToItem(item) {
   }
 }
 
-// Global tracking of out of stock ingredients & map
+// Global tracking of categories, out of stock ingredients & map
+let ALL_CATEGORIES = [];
+let CATEGORY_LOOKUP = {};
+let VALID_PRODUCT_CATEGORY_IDS = new Set();
 let OOS_INGREDIENT_IDS = new Set();
 let OOS_INGREDIENT_MAP = {};
+let INGREDIENT_BY_ID = {};
+let PRODUCT_RECIPE_ENTRIES_MAP = {};
 
-// Helper to determine out-of-stock status strictly based on database chill_recipe & chill_ingredient
-function checkProductStockStatus(product, recipeMap, oosIngIds, oosIngMap, allIngredients) {
+// Helper to identify Add-ons category (never display in kiosk menu or category line)
+function isAddonsCategory(catName = '', catId = null) {
+  const id = Number(catId);
+  if (id === 3 || id === 14) return true;
+  const clean = String(catName || '').trim().toLowerCase();
+  return /^add[\s\-]*ons?$|^adds[\s\-]*ons?|add[\s\-]*on\s*meal/i.test(clean);
+}
+
+// Helper to verify category is strictly a 'Product' category (not Supply, not Ingredient, not Add-ons)
+function isValidProductCategory(cat) {
+  if (!cat) return false;
+  const catType = String(cat.categoryType || cat.type || '').trim().toLowerCase();
+  if (catType !== 'product') return false;
+  const isEnabled = cat.enable === 1 || cat.enable === true || String(cat.enable) === '1';
+  if (!isEnabled) return false;
+  if (cat.isDeleted === 1 || cat.isdeleted === 1 || cat.isDeleted === true) return false;
+  const catId = cat.categoryId || cat.id;
+  const catName = cat.categoryName || cat.name || '';
+  if (isAddonsCategory(catName, catId)) return false;
+  return true;
+}
+
+// Helper to determine if a single ingredient record in chill_ingredient is out of stock or unavailable
+function isIngredientRecordOutOfStock(ing, requiredQty = 0) {
+  if (!ing) return true;
+  if (ing.isDeleted === 1 || ing.isDeleted === true || String(ing.isDeleted) === '1') return true;
+  if (ing.isActive === 0 || ing.isActive === false || String(ing.isActive) === '0') return true;
+
+  const status = (ing.status !== null && ing.status !== undefined) ? String(ing.status).trim().toLowerCase() : '';
+  if (
+    status === '0' ||
+    status === 'false' ||
+    status === 'out_of_stock' ||
+    status === 'out of stock' ||
+    status === 'oos' ||
+    status === 'inactive' ||
+    status === 'unavailable'
+  ) {
+    return true;
+  }
+
+  const stock = (ing.currentStock !== null && ing.currentStock !== undefined && ing.currentStock !== '')
+    ? Number(ing.currentStock)
+    : NaN;
+  if (isNaN(stock) || stock <= 0) return true;
+
+  const req = Number(requiredQty) || 0;
+  if (req > 0 && stock < req) return true;
+
+  return false;
+}
+
+// Fallback ingredient matcher for fixed-price food items if chill_recipe rows are not yet populated for them
+function getFallbackIngredientEntries(product, allIngredients) {
+  if (!product || !allIngredients || !allIngredients.length) return [];
+  const pName = String(product.productName || product.name || '').trim().toLowerCase();
+  const catId = Number(product.categoryId);
+  const activeIngs = allIngredients.filter(i => !(i.isDeleted === 1 || i.isDeleted === true));
+  const findByName = (pattern) => activeIngs.filter(i => pattern.test(String(i.ingredientName || '').trim().toLowerCase()));
+
+  let matched = [];
+  if (catId === 10 || pName.includes('waffle') || pName.includes('croffle')) {
+    matched.push(...findByName(/^flour$|^baking soda$|^egg$/i));
+    if (pName.includes('almond')) matched.push(...findByName(/almond|chocolate syrup/i));
+    else if (pName.includes('choco')) matched.push(...findByName(/chocolate syrup/i));
+    else if (pName.includes('oreo')) matched.push(...findByName(/oreo/i));
+    else if (pName.includes('smores') || pName.includes("s'mores")) matched.push(...findByName(/marshmallow|graham/i));
+    else if (pName.includes('biscoff')) matched.push(...findByName(/biscoff/i));
+  } else if (catId === 11 || pName.includes('sandwich')) {
+    matched.push(...findByName(/^bread$/i));
+    if (pName.includes('chicken')) matched.push(...findByName(/chicken filling|mayonnaise/i));
+    else if (pName.includes('tuna')) matched.push(...findByName(/tuna spread|mayonnaise/i));
+    else if (pName.includes('ham') && pName.includes('cheese')) matched.push(...findByName(/^ham$|cheese slice/i));
+    else if (pName.includes('ham') && pName.includes('egg')) matched.push(...findByName(/^ham$|^egg$/i));
+    else if (pName.includes('clubhouse')) matched.push(...findByName(/^ham$|^egg$|cheese slice|chicken filling/i));
+  } else if (catId === 13 || pName.includes('silog')) {
+    matched.push(...findByName(/fried rice|^egg$/i));
+    if (pName.includes('liempo')) matched.push(...findByName(/^liempo$/i));
+    else if (pName.includes('fried chicken') || pName.includes('chicken')) matched.push(...findByName(/fried chicken/i));
+    else if (pName.includes('hungarian')) matched.push(...findByName(/hungarian sausage/i));
+    else if (pName.includes('spam')) matched.push(...findByName(/^spam$/i));
+    else if (pName.includes('hotsilog') || pName.includes('hotdog')) matched.push(...findByName(/^hotdog$/i));
+    else if (pName.includes('porkchop') || pName.includes('pork chop')) matched.push(...findByName(/pork chop/i));
+    else if (pName.includes('tocino')) matched.push(...findByName(/^tocino$/i));
+    else if (pName.includes('tapa')) matched.push(...findByName(/beef tapa/i));
+  } else if (catId === 15 || pName.includes('spaghetti') || pName.includes('carbonara') || pName.includes('pasta')) {
+    if (pName.includes('spaghetti')) matched.push(...findByName(/spaghetti pasta|spaghetti sauce/i));
+    else if (pName.includes('carbonara')) matched.push(...findByName(/carbonara pasta|carbonara sauce/i));
+  } else if (catId === 12) {
+    if (pName.includes('cheese stick')) matched.push(...findByName(/cheese stick/i));
+    else if (pName.includes('chicken poppers')) matched.push(...findByName(/chicken poppers/i));
+    else if (pName.includes('chix and fries') || pName.includes('chix & fries')) matched.push(...findByName(/chicken poppers|french fries/i));
+  }
+
+  // Deduplicate by ingredientId
+  const seen = new Set();
+  return matched
+    .filter(i => {
+      if (seen.has(i.ingredientId)) return false;
+      seen.add(i.ingredientId);
+      return true;
+    })
+    .map(i => ({
+      ingredientId: Number(i.ingredientId),
+      quantity: 1,
+      unit: i.unit || 'pcs'
+    }));
+}
+
+// Helper to determine out-of-stock status by checking the recipe & ingredients connected to a product first
+function checkProductStockStatus(product, recipeEntriesMap, ingredientById, oosIngIds, oosIngMap, allIngredients) {
   const pId = product.productId;
-  const ingIds = (recipeMap && (recipeMap[pId] || recipeMap[Number(pId)] || recipeMap[String(pId)])) || [];
+  let recipeEntries = (recipeEntriesMap && (recipeEntriesMap[pId] || recipeEntriesMap[Number(pId)] || recipeEntriesMap[String(pId)])) || [];
 
-  // Exact database connection: chill_recipe -> chill_ingredient
-  if (ingIds.length > 0) {
-    for (const rawIngId of ingIds) {
-      const ingId = Number(rawIngId);
-      if (oosIngIds.has(ingId) || oosIngIds.has(rawIngId)) {
-        const ing = (oosIngMap && (oosIngMap[ingId] || oosIngMap[rawIngId])) || 
-                    (allIngredients && allIngredients.find(i => Number(i.ingredientId) === ingId));
-        return {
-          isOutOfStock: true,
-          reason: `${ing ? ing.ingredientName : 'Required ingredient'} is out of stock`
-        };
-      }
+  if (!recipeEntries || recipeEntries.length === 0) {
+    recipeEntries = getFallbackIngredientEntries(product, allIngredients);
+  }
+
+  // If no recipe/ingredient is connected to this product at all, mark as out of stock
+  if (!recipeEntries || recipeEntries.length === 0) {
+    return {
+      isOutOfStock: true,
+      reason: 'No connected recipe or ingredient stock'
+    };
+  }
+
+  // Check every connected recipe/ingredient for out-of-stock status or insufficient stock quantity
+  for (const entry of recipeEntries) {
+    const ingId = Number(entry.ingredientId !== undefined ? entry.ingredientId : entry);
+    const reqQty = Number(entry.quantity) || 0;
+    const ing = (ingredientById && (ingredientById[ingId] || ingredientById[entry.ingredientId])) ||
+                (oosIngMap && (oosIngMap[ingId] || oosIngMap[entry.ingredientId])) ||
+                (allIngredients && allIngredients.find(i => Number(i.ingredientId) === ingId));
+
+    if (!ing || oosIngIds.has(ingId) || isIngredientRecordOutOfStock(ing, reqQty)) {
+      return {
+        isOutOfStock: true,
+        reason: `${ing ? ing.ingredientName : 'Required ingredient'} is out of stock`
+      };
     }
   }
 
@@ -154,7 +281,6 @@ function checkProductStockStatus(product, recipeMap, oosIngIds, oosIngMap, allIn
 }
 
 // Helper to get exact recipe from database (chill_recipe connected to chill_ingredient)
-// Strictly database-driven: does NOT make up any ingredients.
 function getProductIngredients(productId, productRecipeMap) {
   if (productRecipeMap) {
     const list = productRecipeMap[productId] || productRecipeMap[Number(productId)] || productRecipeMap[String(productId)];
@@ -165,12 +291,89 @@ function getProductIngredients(productId, productRecipeMap) {
   return '';
 }
 
+// Build lookup structures from recipes & ingredients lists
+function buildRecipeAndIngredientMaps(recipesList, ingredientsList, productSizes = []) {
+  const ingredientLookup = {};
+  const ingredientById = {};
+  const oosIds = new Set();
+  const oosMap = {};
+
+  (ingredientsList || []).forEach(ing => {
+    const id = Number(ing.ingredientId);
+    ingredientById[id] = ing;
+    ingredientById[ing.ingredientId] = ing;
+    if (!(ing.isDeleted === 1 || ing.isDeleted === true)) {
+      ingredientLookup[ing.ingredientId] = ing.ingredientName;
+      ingredientLookup[id] = ing.ingredientName;
+    }
+    if (isIngredientRecordOutOfStock(ing, 0)) {
+      oosIds.add(id);
+      oosIds.add(ing.ingredientId);
+      oosMap[id] = ing;
+      oosMap[ing.ingredientId] = ing;
+    }
+  });
+
+  // Map productSizeId -> productId so recipes linked via productSizeId also resolve to their product
+  const sizeToProductMap = {};
+  (productSizes || []).forEach(ps => {
+    if (ps.productSizeId && ps.productId) {
+      sizeToProductMap[Number(ps.productSizeId)] = Number(ps.productId);
+    }
+  });
+
+  const productRecipeMap = {};
+  const productRecipeEntriesMap = {};
+
+  (recipesList || []).forEach(r => {
+    if (r.enabled === 0 || r.enabled === false || String(r.enabled) === '0') return;
+    const rawPId = r.productId || sizeToProductMap[Number(r.productSizeId)];
+    if (!rawPId) return;
+    const pId = Number(rawPId);
+    const ingId = Number(r.ingredientId);
+
+    if (!productRecipeMap[pId]) productRecipeMap[pId] = [];
+    if (!productRecipeEntriesMap[pId]) productRecipeEntriesMap[pId] = [];
+
+    productRecipeEntriesMap[pId].push({
+      recipeId: r.recipeId,
+      ingredientId: ingId,
+      quantity: Number(r.quantity) || 0,
+      unit: r.unit || '',
+      productSizeId: r.productSizeId
+    });
+
+    const ingObj = ingredientById[ingId];
+    const ingName = ingObj ? ingObj.ingredientName : (ingredientLookup[r.ingredientId] || ingredientLookup[ingId]);
+    if (ingName && !productRecipeMap[pId].includes(ingName)) {
+      productRecipeMap[pId].push(ingName);
+    }
+  });
+
+  return {
+    ingredientLookup,
+    ingredientById,
+    oosIds,
+    oosMap,
+    productRecipeMap,
+    productRecipeEntriesMap
+  };
+}
+
 // Update card UI in-place when stock becomes available or out of stock
 function updateCardStockUI(item) {
   const cards = document.querySelectorAll(`[data-product-id="${item.productId}"]`);
   cards.forEach(card => {
     const isOOS = !!item.isOutOfStock;
     card.classList.toggle('out-of-stock', isOOS);
+    card.style.pointerEvents = isOOS ? 'none' : '';
+    if (isOOS) {
+      card.setAttribute('aria-disabled', 'true');
+      card.setAttribute('tabindex', '-1');
+    } else {
+      card.removeAttribute('aria-disabled');
+      card.removeAttribute('tabindex');
+    }
 
     const imgWrap = card.querySelector('.item-img-wrap');
     let badge = imgWrap ? imgWrap.querySelector('.stock-badge-oos') : null;
@@ -195,12 +398,12 @@ function updateCardStockUI(item) {
     if (addBtn) {
       if (isOOS) {
         addBtn.disabled = true;
-        addBtn.classList.add('disabled');
-        addBtn.textContent = '✕';
-        addBtn.setAttribute('aria-label', 'Out of stock');
+        addBtn.classList.add('disabled', 'oos-btn');
+        addBtn.textContent = 'Out of Stock';
+        addBtn.setAttribute('aria-label', 'Out of Stock');
       } else {
         addBtn.disabled = false;
-        addBtn.classList.remove('disabled');
+        addBtn.classList.remove('disabled', 'oos-btn');
         addBtn.textContent = '+';
         addBtn.setAttribute('aria-label', `Add ${item.productName || item.name}`);
       }
@@ -223,55 +426,38 @@ async function refreshInventoryStock() {
     ALL_RECIPES = recipesList;
     ALL_INGREDIENTS = ingredientsList;
 
-    const ingredientLookup = {};
-    const oosIds = new Set();
-    const oosMap = {};
-
-    ingredientsList.forEach(ing => {
-      ingredientLookup[ing.ingredientId] = ing.ingredientName;
-      const stock = (ing.currentStock !== null && ing.currentStock !== undefined) ? Number(ing.currentStock) : null;
-      const status = (ing.status !== null && ing.status !== undefined) ? String(ing.status).trim() : null;
-      const isOOS = (stock !== null && !isNaN(stock) && stock <= 0) ||
-                    status === '0' ||
-                    status === 'out_of_stock' ||
-                    status === 'Out of Stock' ||
-                    status === 'inactive';
-      if (isOOS) {
-        oosIds.add(ing.ingredientId);
-        oosMap[ing.ingredientId] = ing;
-      }
-    });
+    const {
+      ingredientById,
+      oosIds,
+      oosMap,
+      productRecipeMap,
+      productRecipeEntriesMap
+    } = buildRecipeAndIngredientMaps(recipesList, ingredientsList, ALL_PRODUCT_SIZES);
 
     OOS_INGREDIENT_IDS = oosIds;
     OOS_INGREDIENT_MAP = oosMap;
-
-    const productRecipeMap = {};
-    const productRecipeIdsMap = {};
-    recipesList.forEach(r => {
-      const pId = r.productId;
-      const numPId = Number(r.productId);
-      const ingId = Number(r.ingredientId);
-
-      if (!productRecipeMap[pId]) productRecipeMap[pId] = [];
-      if (!productRecipeMap[numPId]) productRecipeMap[numPId] = productRecipeMap[pId];
-      if (!productRecipeIdsMap[pId]) productRecipeIdsMap[pId] = [];
-      if (!productRecipeIdsMap[numPId]) productRecipeIdsMap[numPId] = productRecipeIdsMap[pId];
-
-      if (!productRecipeIdsMap[pId].includes(ingId)) {
-        productRecipeIdsMap[pId].push(ingId);
-      }
-      const ingName = ingredientLookup[r.ingredientId] || ingredientLookup[ingId];
-      if (ingName && !productRecipeMap[pId].includes(ingName)) {
-        productRecipeMap[pId].push(ingName);
-      }
-    });
+    INGREDIENT_BY_ID = ingredientById;
+    PRODUCT_RECIPE_ENTRIES_MAP = productRecipeEntriesMap;
 
     ALL_ITEMS.forEach(item => {
-      const dbIngredients = productRecipeMap[item.productId] || productRecipeMap[Number(item.productId)] || [];
+      let dbIngredients = productRecipeMap[item.productId] || productRecipeMap[Number(item.productId)] || [];
+      if (dbIngredients.length === 0) {
+        const fallbackEntries = getFallbackIngredientEntries(item, ingredientsList);
+        dbIngredients = fallbackEntries
+          .map(e => ingredientById[e.ingredientId]?.ingredientName)
+          .filter(Boolean);
+      }
       item.recipe = dbIngredients.length > 0 ? dbIngredients.join(', ') : '';
       item.ingredients = dbIngredients;
 
-      const stockStatus = checkProductStockStatus(item, productRecipeIdsMap, oosIds, oosMap, ingredientsList);
+      const stockStatus = checkProductStockStatus(
+        item,
+        productRecipeEntriesMap,
+        ingredientById,
+        oosIds,
+        oosMap,
+        ingredientsList
+      );
       item.isOutOfStock = stockStatus.isOutOfStock;
       item.outOfStockReason = stockStatus.reason;
 
@@ -312,7 +498,7 @@ async function refreshInventoryStock() {
   }
 }
 
-// Real-time listener for database stock & recipe updates
+// Real-time listener for database stock, recipe & category updates
 let realtimeStockListenerInitialized = false;
 function initRealtimeStockListener() {
   if (!db || realtimeStockListenerInitialized) return;
@@ -324,6 +510,12 @@ function initRealtimeStockListener() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_recipe' }, () => {
         refreshInventoryStock();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_category' }, () => {
+        loadCategoriesFromSupabase().then(() => buildGrids());
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_product_item' }, () => {
+        loadMenuFromSupabase();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_promotion' }, () => {
         loadPromosFromSupabase();
@@ -341,7 +533,7 @@ function initRealtimeStockListener() {
 }
 
 // ═════════════════════════════════════════
-// 2. FETCH MENU, SIZES, ADDONS & RECIPES
+// 2. FETCH CATEGORIES, RECIPES, INGREDIENTS & MENU
 // ═════════════════════════════════════════
 async function loadMenuFromSupabase() {
   if (!db) {
@@ -350,14 +542,25 @@ async function loadMenuFromSupabase() {
   }
   
   try {
-    // 1. Fetch enabled products
+    // Step 1: Load Product categories from database first (excluding Supply, Ingredient, and Add-ons)
+    await loadCategoriesFromSupabase();
+
+    // Step 2: Fetch recipes & ingredients FIRST so we can check product stock before rendering cards
+    const [rRes, ingRes] = await Promise.all([
+      db.from('chill_recipe').select('*'),
+      db.from('chill_ingredient').select('*')
+    ]);
+    const recipesList = rRes.data || [];
+    const ingredientsList = ingRes.data || [];
+
+    // Step 3: Fetch enabled products, sizes, addons, addon recipes & promotions
     const { data: productsData, error: prodError } = await db
       .from('chill_product_item')
       .select('*')
       .eq('enable', 1);
     if (prodError) throw prodError;
 
-    // 2. Fetch product sizes (with fallback to chill_product_sizes)
+    // Fetch product sizes (with fallback to chill_product_sizes)
     let productSizes = [];
     const { data: psData, error: psError } = await db
       .from('chill_product_size')
@@ -373,7 +576,7 @@ async function loadMenuFromSupabase() {
       if (psData2) productSizes = psData2;
     }
 
-    // 3. Fetch sizes (with fallback to chill_sizes)
+    // Fetch sizes (with fallback to chill_sizes)
     let sizes = [];
     const { data: sData, error: sError } = await db
       .from('chill_size')
@@ -389,7 +592,7 @@ async function loadMenuFromSupabase() {
       if (sData2) sizes = sData2;
     }
 
-    // 4. Fetch addons (chill_addons) & product addons (chill_product_addons)
+    // Fetch addons (chill_addons) & product addons (chill_product_addons)
     let addonsList = [];
     const { data: aData, error: aError } = await db
       .from('chill_addons')
@@ -408,20 +611,7 @@ async function loadMenuFromSupabase() {
       productAddonsList = paData;
     }
 
-    // 5. Fetch recipes (chill_recipe) & ingredients (chill_ingredient)
-    let recipesList = [];
-    const { data: rData } = await db
-      .from('chill_recipe')
-      .select('*');
-    if (rData) recipesList = rData;
-
-    let ingredientsList = [];
-    const { data: ingData } = await db
-      .from('chill_ingredient')
-      .select('*');
-    if (ingData) ingredientsList = ingData;
-
-    // 6. Fetch addon recipes (chill_addon_recipe) for syrups/sauces/powders sub-ingredients
+    // Fetch addon recipes (chill_addon_recipe) for syrups/sauces/powders sub-ingredients
     let addonRecipesList = [];
     const { data: arData } = await db
       .from('chill_addon_recipe')
@@ -429,7 +619,7 @@ async function loadMenuFromSupabase() {
       .eq('enabled', 1);
     if (arData) addonRecipesList = arData;
 
-    // 7. Fetch promotions (chill_promotion) & affected products (chill_promotion_product)
+    // Fetch promotions (chill_promotion) & affected products (chill_promotion_product)
     let promotionsList = [];
     let promotionProductsList = [];
     const { data: promoData } = await db
@@ -495,11 +685,20 @@ async function loadMenuFromSupabase() {
       }
     });
 
-    // Map ingredients by ingredientId
-    const ingredientLookup = {};
-    ingredientsList.forEach(ing => {
-      ingredientLookup[ing.ingredientId] = ing.ingredientName;
-    });
+    // Build recipe & ingredient stock maps first before building product items
+    const {
+      ingredientLookup,
+      ingredientById,
+      oosIds,
+      oosMap,
+      productRecipeMap,
+      productRecipeEntriesMap
+    } = buildRecipeAndIngredientMaps(recipesList, ingredientsList, productSizes);
+
+    OOS_INGREDIENT_IDS = oosIds;
+    OOS_INGREDIENT_MAP = oosMap;
+    INGREDIENT_BY_ID = ingredientById;
+    PRODUCT_RECIPE_ENTRIES_MAP = productRecipeEntriesMap;
 
     // Map addon recipes by addonsId
     const addonRecipeMap = {};
@@ -519,49 +718,18 @@ async function loadMenuFromSupabase() {
     });
     ALL_ADDON_RECIPES = addonRecipeMap;
 
-    // Map recipe ingredients and IDs by productId
-    const productRecipeMap = {};
-    const productRecipeIdsMap = {};
-    recipesList.forEach(r => {
-      const pId = r.productId;
-      const numPId = Number(r.productId);
-      const ingId = Number(r.ingredientId);
-
-      if (!productRecipeMap[pId]) productRecipeMap[pId] = [];
-      if (!productRecipeMap[numPId]) productRecipeMap[numPId] = productRecipeMap[pId];
-      if (!productRecipeIdsMap[pId]) productRecipeIdsMap[pId] = [];
-      if (!productRecipeIdsMap[numPId]) productRecipeIdsMap[numPId] = productRecipeIdsMap[pId];
-
-      if (!productRecipeIdsMap[pId].includes(ingId)) {
-        productRecipeIdsMap[pId].push(ingId);
-      }
-      const ingName = ingredientLookup[r.ingredientId] || ingredientLookup[ingId];
-      if (ingName && !productRecipeMap[pId].includes(ingName)) {
-        productRecipeMap[pId].push(ingName);
-      }
-    });
-
-    // Detect out of stock ingredients in database
-    const oosIds = new Set();
-    const oosMap = {};
-    ingredientsList.forEach(ing => {
-      const stock = (ing.currentStock !== null && ing.currentStock !== undefined) ? Number(ing.currentStock) : null;
-      const status = (ing.status !== null && ing.status !== undefined) ? String(ing.status).trim() : null;
-      const isOOS = (stock !== null && !isNaN(stock) && stock <= 0) ||
-                    status === '0' ||
-                    status === 'out_of_stock' ||
-                    status === 'Out of Stock' ||
-                    status === 'inactive';
-      if (isOOS) {
-        oosIds.add(ing.ingredientId);
-        oosMap[ing.ingredientId] = ing;
-      }
-    });
-    OOS_INGREDIENT_IDS = oosIds;
-    OOS_INGREDIENT_MAP = oosMap;
-
     if (productsData && productsData.length > 0) {
-      ALL_ITEMS = productsData.map(item => {
+      // Filter out any product belonging to Add-ons category, non-Product category, or deleted
+      const validProducts = productsData.filter(item => {
+        if (item.isdeleted === 1 || item.isDeleted === 1 || item.isdeleted === true) return false;
+        const cId = Number(item.categoryId);
+        const cName = item.categoryName || CATEGORY_LOOKUP[cId] || '';
+        if (isAddonsCategory(cName, cId)) return false;
+        if (VALID_PRODUCT_CATEGORY_IDS.size > 0 && !VALID_PRODUCT_CATEGORY_IDS.has(cId)) return false;
+        return true;
+      });
+
+      ALL_ITEMS = validProducts.map(item => {
         const itemSizes = productSizesMap[item.productId] || [];
         itemSizes.sort((a, b) => a.price - b.price);
 
@@ -580,13 +748,33 @@ async function loadMenuFromSupabase() {
           maxPrice = rawPrice;
         }
 
-        const ingList = productRecipeMap[item.productId] || [];
+        // Check recipe & ingredients connected to product first
+        let ingList = productRecipeMap[item.productId] || productRecipeMap[Number(item.productId)] || [];
+        if (ingList.length === 0) {
+          const fallbackEntries = getFallbackIngredientEntries(item, ingredientsList);
+          ingList = fallbackEntries
+            .map(e => ingredientById[e.ingredientId]?.ingredientName)
+            .filter(Boolean);
+        }
         const cleanDesc = (item.description || item.desc || '').replace(/^''$/, '').trim();
-        const recipeText = getProductIngredients(item.productId, productRecipeMap);
-        const stockStatus = checkProductStockStatus(item, productRecipeIdsMap, oosIds, oosMap, ingredientsList);
+        const recipeText = ingList.length > 0 ? ingList.join(', ') : getProductIngredients(item.productId, productRecipeMap);
+        const stockStatus = checkProductStockStatus(
+          item,
+          productRecipeEntriesMap,
+          ingredientById,
+          oosIds,
+          oosMap,
+          ingredientsList
+        );
+        const catId = Number(item.categoryId);
+        const catName = CATEGORY_LOOKUP[catId] || item.categoryName || '';
 
         return {
           ...item,
+          categoryId: catId,
+          categoryName: catName,
+          catKey: `cat-${catId}`,
+          cat: mapCategoryToSlug(catId, catName),
           productName: (item.productName || item.name || '').trim(),
           description: cleanDesc,
           recipe: recipeText,
@@ -706,9 +894,15 @@ function renderTopSellingCard(product) {
     }
   }
 
-  const isOOS = product.isOutOfStock;
+  const isOOS = !!product.isOutOfStock;
   if (featCard) {
-    featCard.classList.toggle('out-of-stock', !!isOOS);
+    featCard.classList.toggle('out-of-stock', isOOS);
+    featCard.style.pointerEvents = isOOS ? 'none' : '';
+    if (isOOS) {
+      featCard.setAttribute('aria-disabled', 'true');
+    } else {
+      featCard.removeAttribute('aria-disabled');
+    }
     const existingBadge = featCard.querySelector('.stock-badge-oos');
     if (existingBadge) existingBadge.remove();
     if (isOOS) {
@@ -720,22 +914,20 @@ function renderTopSellingCard(product) {
   }
 
   if (featAddBtn) {
-    featAddBtn.disabled = !!isOOS;
-    featAddBtn.classList.toggle('disabled', !!isOOS);
-    featAddBtn.textContent = isOOS ? '✕' : '+';
+    featAddBtn.disabled = isOOS;
+    featAddBtn.classList.toggle('disabled', isOOS);
+    featAddBtn.classList.toggle('oos-btn', isOOS);
+    featAddBtn.textContent = isOOS ? 'Out of Stock' : '+';
   }
 
   const fn = (e) => {
     if (e) e.stopPropagation();
-    if (product.isOutOfStock) {
-      showToast(`${product.productName} is currently out of stock`, 'warning');
-      return;
-    }
+    if (product.isOutOfStock) return;
     triggerConfirmation(product);
   };
 
-  if (featCard) featCard.onclick = fn;
-  if (featAddBtn) featAddBtn.onclick = fn;
+  if (featCard) featCard.onclick = isOOS ? null : fn;
+  if (featAddBtn) featAddBtn.onclick = isOOS ? null : fn;
 }
 
 // ═════════════════════════════════════════
@@ -748,55 +940,115 @@ async function loadCategoriesFromSupabase() {
     const { data, error } = await db
       .from('chill_category')
       .select('*')
-      .eq('categoryType', 'Product')
-      .eq('enable', 1);
+      .order('categoryId', { ascending: true });
     
     if (error) throw error;
-    
-    const container = document.getElementById('categoryContainer');
-    if (!container) return;
 
-    let html = `<button class="cat-pill active" data-cat="all">All</button>`;
-    
-    const slugLabels = {
-      espresso: 'Espresso',
-      noncoffee: 'Non-Coffee',
-      milktea: 'Milk Tea',
-      frappe: 'Frappe',
-      fruittea: 'Fruit Tea',
-      soda: 'Soda',
-      croffle: 'Croffles',
-      sandwiches: 'Sandwiches',
-      snacks: 'Snacks',
-      silog: 'Silog Meals',
-      pasta: 'Pasta'
-    };
+    // Strictly filter to only 'Product' categoryType, enabled, and exclude Supply, Ingredient, and Add-ons
+    const validCategories = (data || []).filter(cat => isValidProductCategory(cat));
 
-    const addedSlugs = new Set();
-    
-    if (data && data.length > 0) {
-      data.forEach(cat => {
-        const catName = cat.categoryName || cat.name;
-        const catId = cat.categoryId || cat.id;
-        if (catId === 3 || catId === 14) return; // Skip add-ons category
-        const catVal = mapCategoryToSlug(catId, catName);
-        
-        if (catVal && !addedSlugs.has(catVal)) {
-          addedSlugs.add(catVal);
-          const label = slugLabels[catVal] || catName;
-          html += `<button class="cat-pill" data-cat="${catVal}">${label}</button>`;
-        }
-      });
-    }
-    
-    container.innerHTML = html;
+    ALL_CATEGORIES = validCategories;
+    CATEGORY_LOOKUP = {};
+    VALID_PRODUCT_CATEGORY_IDS = new Set();
 
-    document.querySelectorAll('.cat-pill').forEach(p => {
-      p.addEventListener('click', () => filterCat(p, p.dataset.cat));
+    validCategories.forEach(cat => {
+      const cId = Number(cat.categoryId || cat.id);
+      const cName = (cat.categoryName || cat.name || '').trim();
+      CATEGORY_LOOKUP[cId] = cName;
+      VALID_PRODUCT_CATEGORY_IDS.add(cId);
     });
+
+    renderCategoryPillsAndSections(validCategories);
   } catch (err) {
     console.error("Failed to load categories:", err);
   }
+}
+
+function renderCategoryPillsAndSections(categories) {
+  const container = document.getElementById('categoryContainer');
+  const sectionsContainer = document.getElementById('menuCategoriesSections');
+
+  if (container) {
+    let pillsHtml = `<button class="cat-pill active" data-cat="all">All</button>`;
+    (categories || []).forEach(cat => {
+      const catId = Number(cat.categoryId || cat.id);
+      const catName = (cat.categoryName || cat.name || '').trim();
+      pillsHtml += `<button class="cat-pill" data-cat="cat-${catId}" data-cat-id="${catId}">${catName}</button>`;
+    });
+    container.innerHTML = pillsHtml;
+
+    container.querySelectorAll('.cat-pill').forEach(p => {
+      p.addEventListener('click', () => filterCat(p, p.dataset.cat));
+    });
+
+    initCategoryRowScrollBehavior(container);
+  }
+
+  if (sectionsContainer) {
+    sectionsContainer.innerHTML = (categories || []).map(cat => {
+      const catId = Number(cat.categoryId || cat.id);
+      const catName = (cat.categoryName || cat.name || '').trim();
+      return `
+        <div class="section-hd filterable-title" id="cat-section-${catId}" data-category="cat-${catId}" data-cat-id="${catId}">
+          <h3>${catName}</h3>
+        </div>
+        <div class="items-grid filterable-item" id="cat-grid-${catId}" data-category="cat-${catId}" data-cat-id="${catId}"></div>
+      `;
+    }).join('');
+  }
+}
+
+let categoryRowScrollInitialized = false;
+function initCategoryRowScrollBehavior(container) {
+  if (!container || categoryRowScrollInitialized) return;
+  categoryRowScrollInitialized = true;
+
+  // Convert vertical mouse wheel to horizontal scroll on the category bar
+  container.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault();
+      container.scrollLeft += e.deltaY;
+    }
+  }, { passive: false });
+
+  // Mouse drag-to-scroll for kiosk/desktop screens
+  let isDown = false;
+  let startX = 0;
+  let scrollLeft = 0;
+  let moved = false;
+
+  container.addEventListener('mousedown', (e) => {
+    isDown = true;
+    moved = false;
+    container.classList.add('dragging');
+    startX = e.pageX - container.offsetLeft;
+    scrollLeft = container.scrollLeft;
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!isDown) return;
+    isDown = false;
+    container.classList.remove('dragging');
+  });
+
+  container.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    const x = e.pageX - container.offsetLeft;
+    const walk = (x - startX) * 1.4;
+    if (Math.abs(walk) > 6) {
+      moved = true;
+      e.preventDefault();
+      container.scrollLeft = scrollLeft - walk;
+    }
+  });
+
+  container.addEventListener('click', (e) => {
+    if (moved) {
+      e.stopPropagation();
+      e.preventDefault();
+      moved = false;
+    }
+  }, true);
 }
 
 function mapCategoryToSlug(catId, catName = '') {
@@ -817,7 +1069,6 @@ function mapCategoryToSlug(catId, catName = '') {
 }
 
 loadMenuFromSupabase();
-loadCategoriesFromSupabase();
 
 // ═════════════════════════════════════════
 // 4. UI & GRID BUILDERS
@@ -827,6 +1078,11 @@ function makeCard(item) {
   d.dataset.productId = item.productId;
   const isOOS = !!item.isOutOfStock;
   d.className = `item-card ${isOOS ? 'out-of-stock' : ''}`;
+  if (isOOS) {
+    d.style.pointerEvents = 'none';
+    d.setAttribute('aria-disabled', 'true');
+    d.setAttribute('tabindex', '-1');
+  }
 
   const itemName = item.productName || item.name || 'Unknown Item';
   const cleanDesc = (item.description && item.description.trim() && item.description.trim() !== "''") ? item.description.trim() : '';
@@ -865,7 +1121,7 @@ function makeCard(item) {
 
   const stockBadgeHTML = isOOS ? `<span class="stock-badge-oos">Out of Stock</span>` : '';
   const addBtnHTML = isOOS
-    ? `<button class="add-btn disabled" disabled aria-label="Out of stock">✕</button>`
+    ? `<button class="add-btn oos-btn disabled" disabled aria-label="Out of Stock">Out of Stock</button>`
     : `<button class="add-btn" aria-label="Add ${itemName}">+</button>`;
 
   d.innerHTML = `
@@ -884,41 +1140,61 @@ function makeCard(item) {
     </div>
   `;
 
-  const handleCardClick = () => {
+  const handleCardClick = (e) => {
     const currentItem = ALL_ITEMS.find(i => i.productId === item.productId) || item;
     if (currentItem.isOutOfStock) {
-      showToast(`${currentItem.productName || itemName} is currently out of stock (${currentItem.outOfStockReason || 'unavailable ingredients'})`, 'warning');
+      if (e) e.stopPropagation();
       return;
     }
     triggerConfirmation(currentItem);
   };
 
-  const addBtn = d.querySelector('.add-btn');
-  if (addBtn) {
-    addBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      handleCardClick();
-    });
+  if (!isOOS) {
+    const addBtn = d.querySelector('.add-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        handleCardClick(e);
+      });
+    }
+    d.addEventListener('click', handleCardClick);
   }
-  d.addEventListener('click', handleCardClick);
 
   return d;
 }
 
 function buildGrids() {
+  // Ensure category sections exist if ALL_CATEGORIES was loaded
+  const sectionsContainer = document.getElementById('menuCategoriesSections');
+  if (sectionsContainer && sectionsContainer.children.length === 0 && ALL_CATEGORIES.length > 0) {
+    renderCategoryPillsAndSections(ALL_CATEGORIES);
+  }
+
   document.querySelectorAll('.items-grid').forEach(grid => {
     if (grid.id !== 'searchResultsGrid') grid.innerHTML = '';
   });
 
   ALL_ITEMS.forEach(item => {
-    const catId = item.categoryId;
-    const safeCategory = mapCategoryToSlug(catId, item.categoryName || '');
-    item.cat = safeCategory;
+    const catId = Number(item.categoryId);
+    if (isAddonsCategory(item.categoryName, catId)) return;
 
-    const grid = document.getElementById(safeCategory + 'Grid');
+    item.catKey = `cat-${catId}`;
+    item.cat = mapCategoryToSlug(catId, item.categoryName || CATEGORY_LOOKUP[catId] || '');
+
+    const grid = document.getElementById(`cat-grid-${catId}`);
     if (grid) {
       grid.appendChild(makeCard(item));
     }
+  });
+
+  // Hide any category section that has 0 products so no empty headers clutter the menu
+  ALL_CATEGORIES.forEach(cat => {
+    const catId = Number(cat.categoryId || cat.id);
+    const sec = document.getElementById(`cat-section-${catId}`);
+    const grid = document.getElementById(`cat-grid-${catId}`);
+    const hasProducts = grid && grid.children.length > 0;
+    if (sec) sec.style.display = hasProducts ? '' : 'none';
+    if (grid) grid.style.display = hasProducts ? '' : 'none';
   });
 }
 
@@ -1355,6 +1631,9 @@ function newOrder() {
   goTo('menuScreen');
 }
 
+let isProgrammaticCategoryScroll = false;
+let programmaticScrollTimeout = null;
+
 function filterCat(btn, cat) {
   const searchInput = document.getElementById('menuSearch');
   const searchContainer = document.getElementById('searchResultsContainer');
@@ -1362,13 +1641,102 @@ function filterCat(btn, cat) {
     searchInput.value = '';
     if (searchContainer) searchContainer.classList.add('hidden');
   }
+
   document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  
+  if (btn) {
+    btn.classList.add('active');
+    // Scroll the category line horizontally so the clicked category pill is centered/visible
+    btn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }
+
+  // Keep all category sections visible so the menu is scrollable and can auto-scroll to the chosen category
   document.querySelectorAll('.filterable-item,.filterable-title').forEach(el => {
-    el.dataset.hidden = (cat !== 'all' && el.dataset.category !== cat) ? 'true' : 'false';
+    el.dataset.hidden = 'false';
   });
+
+  const menuScreen = document.getElementById('menuScreen');
+  if (!menuScreen) return;
+
+  isProgrammaticCategoryScroll = true;
+  clearTimeout(programmaticScrollTimeout);
+  programmaticScrollTimeout = setTimeout(() => {
+    isProgrammaticCategoryScroll = false;
+  }, 750);
+
+  if (cat === 'all') {
+    menuScreen.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+
+  // Find target category section & product grid under that category
+  const catId = btn?.dataset?.catId || String(cat).replace(/^cat-/, '');
+  const targetSection =
+    document.getElementById(`cat-section-${catId}`) ||
+    document.querySelector(`.filterable-title[data-category="${cat}"]`) ||
+    document.getElementById(`cat-grid-${catId}`) ||
+    document.querySelector(`.filterable-item[data-category="${cat}"]`);
+
+  if (targetSection) {
+    const topNav = menuScreen.querySelector('.top-nav');
+    const catRow = document.getElementById('categoryContainer');
+    const navHeight = (topNav ? topNav.offsetHeight : 64) + (catRow ? catRow.offsetHeight : 54) + 12;
+
+    const screenRect = menuScreen.getBoundingClientRect();
+    const targetRect = targetSection.getBoundingClientRect();
+    const scrollTarget = menuScreen.scrollTop + (targetRect.top - screenRect.top) - navHeight;
+
+    menuScreen.scrollTo({
+      top: Math.max(0, scrollTarget),
+      behavior: 'smooth'
+    });
+  }
 }
+
+// Keep active category pill synced while user scrolls through products on menuScreen
+document.addEventListener('DOMContentLoaded', () => {
+  const menuScreen = document.getElementById('menuScreen');
+  if (!menuScreen) return;
+
+  menuScreen.addEventListener('scroll', () => {
+    if (isProgrammaticCategoryScroll) return;
+    const searchInput = document.getElementById('menuSearch');
+    if (searchInput && searchInput.value.trim()) return;
+
+    const topNav = menuScreen.querySelector('.top-nav');
+    const catRow = document.getElementById('categoryContainer');
+    const threshold = (topNav ? topNav.offsetHeight : 64) + (catRow ? catRow.offsetHeight : 54) + 40;
+    const screenTop = menuScreen.getBoundingClientRect().top;
+
+    if (menuScreen.scrollTop < 120) {
+      const allPill = document.querySelector('.cat-pill[data-cat="all"]');
+      if (allPill && !allPill.classList.contains('active')) {
+        document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+        allPill.classList.add('active');
+        allPill.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+      }
+      return;
+    }
+
+    const sections = document.querySelectorAll('#menuCategoriesSections .filterable-title');
+    let activeCatKey = null;
+    sections.forEach(sec => {
+      if (sec.style.display === 'none' || sec.dataset.hidden === 'true') return;
+      const relTop = sec.getBoundingClientRect().top - screenTop;
+      if (relTop <= threshold) {
+        activeCatKey = sec.dataset.category;
+      }
+    });
+
+    if (activeCatKey) {
+      const targetPill = document.querySelector(`.cat-pill[data-cat="${activeCatKey}"]`);
+      if (targetPill && !targetPill.classList.contains('active')) {
+        document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+        targetPill.classList.add('active');
+        targetPill.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+  }, { passive: true });
+});
 
 let toastTimer;
 function showToast(msg, iconType = 'success') {
@@ -1476,7 +1844,8 @@ if (menuSearchInput) {
       const itemName = item.productName || item.name || '';
       const itemDesc = item.description || item.desc || '';
       const catVal = item.cat || '';
-      const searchable = removeAccents(`${itemName} ${itemDesc} ${catVal} ${item.productId || item.uid}`).toLowerCase();
+      const catName = item.categoryName || '';
+      const searchable = removeAccents(`${itemName} ${itemDesc} ${catVal} ${catName} ${item.productId || item.uid}`).toLowerCase();
       
       if (searchable.includes(query)) {
         if (searchGrid) searchGrid.appendChild(makeCard(item));
@@ -1968,18 +2337,17 @@ if (btnDownloadPdf) {
 // Featured Card Binding (Top Selling Product)
 const fc = document.getElementById('featCard');
 if (fc) {
-  const fcFn = () => {
-    if (TOP_SELLING_PRODUCT) {
-      triggerConfirmation(TOP_SELLING_PRODUCT);
-    } else if (ALL_ITEMS.length > 0) {
-      triggerConfirmation(ALL_ITEMS[0]);
-    }
+  const fcFn = (e) => {
+    if (e) e.stopPropagation();
+    const targetProd = TOP_SELLING_PRODUCT || ALL_ITEMS.find(i => !i.isOutOfStock);
+    if (!targetProd || targetProd.isOutOfStock) return;
+    triggerConfirmation(targetProd);
   };
   const featAddBtn = document.getElementById('featAddBtn');
   if (featAddBtn) {
-    featAddBtn.addEventListener('click', e => { e.stopPropagation(); fcFn(); });
+    featAddBtn.onclick = fcFn;
   }
-  fc.addEventListener('click', fcFn);
+  fc.onclick = fcFn;
 }
 
 function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotalAmount, totalCount, discountAmount, finalTotal) {

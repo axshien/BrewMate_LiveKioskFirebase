@@ -410,15 +410,34 @@
        CATEGORY PILLS
     ══════════════════════════════ */
     .cat-row {
-      display: flex; gap: clamp(6px, 1vw, 10px);
+      position: sticky;
+      top: clamp(58px, 8vh, 74px);
+      z-index: 45;
+      background: var(--bg);
+      display: flex;
+      gap: clamp(6px, 1vw, 10px);
       overflow-x: auto;
-      padding-bottom: 6px;
-      margin-bottom: clamp(18px, 2.5vw, 28px);
-      scrollbar-width: none;
+      overflow-y: hidden;
+      padding: 10px 2px 10px;
+      margin-bottom: clamp(14px, 2vw, 22px);
+      scrollbar-width: thin;
+      scrollbar-color: rgba(137, 87, 204, 0.28) transparent;
       -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
       scroll-snap-type: x proximity;
+      cursor: grab;
     }
-    .cat-row::-webkit-scrollbar { display: none; }
+    .cat-row.dragging {
+      cursor: grabbing;
+      scroll-behavior: auto;
+      scroll-snap-type: none;
+    }
+    .cat-row::-webkit-scrollbar { height: 4px; }
+    .cat-row::-webkit-scrollbar-track { background: transparent; }
+    .cat-row::-webkit-scrollbar-thumb {
+      background: rgba(137, 87, 204, 0.25);
+      border-radius: 10px;
+    }
 
     .cat-pill {
       flex-shrink: 0;
@@ -435,6 +454,7 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      white-space: nowrap;
     }
     .cat-pill.active {
       background: var(--primary); color: white;
@@ -448,6 +468,7 @@
       display: flex; justify-content: space-between;
       align-items: center;
       margin: clamp(16px, 2.5vw, 24px) 0 clamp(10px, 1.5vw, 14px);
+      scroll-margin-top: 140px;
     }
     .section-hd h3 {
       font-size: clamp(16px, 2vw, 22px);
@@ -474,6 +495,13 @@
       transition: transform .12s, box-shadow .12s;
     }
     .featured-card:active { transform: scale(0.99); box-shadow: 0 2px 8px rgba(0,0,0,0.07); }
+    .featured-card.out-of-stock {
+      opacity: 0.6;
+      cursor: not-allowed !important;
+      pointer-events: none !important;
+      user-select: none !important;
+      filter: grayscale(40%);
+    }
     .feat-img-wrap {
       width: clamp(64px, 8vw, 84px);
       height: clamp(64px, 8vw, 84px);
@@ -608,13 +636,16 @@
       transform: scale(1.05);
     }
     .item-card.out-of-stock {
-      opacity: 0.6;
-      cursor: not-allowed;
-      filter: grayscale(40%);
+      opacity: 0.62;
+      cursor: not-allowed !important;
+      pointer-events: none !important;
+      user-select: none !important;
+      filter: grayscale(45%);
     }
-    .item-card.out-of-stock:hover {
-      transform: none;
-      box-shadow: 0 4px 16px rgba(30, 27, 46, 0.04);
+    .item-card.out-of-stock:hover,
+    .item-card.out-of-stock:active {
+      transform: none !important;
+      box-shadow: 0 4px 16px rgba(30, 27, 46, 0.04) !important;
     }
     .stock-badge-oos {
       position: absolute;
@@ -680,11 +711,25 @@
     }
     .add-btn.disabled,
     .add-btn:disabled {
-      background: #e2dfeb !important;
-      color: #9c97a8 !important;
+      background: #FDEDED !important;
+      color: #E53935 !important;
+      border: 1px solid #FADBD8 !important;
       cursor: not-allowed !important;
       pointer-events: none !important;
       box-shadow: none !important;
+    }
+    .add-btn.oos-btn {
+      width: auto !important;
+      min-width: 0 !important;
+      height: auto !important;
+      min-height: 30px !important;
+      padding: 5px 10px !important;
+      font-size: 10.5px !important;
+      font-weight: 800 !important;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      border-radius: 8px !important;
+      white-space: nowrap;
     }
     .item-emoji {
       display: none;
