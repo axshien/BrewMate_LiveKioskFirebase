@@ -377,20 +377,11 @@
       margin-bottom: clamp(14px, 2vw, 20px);
       width: 100%;
     }
-    .search-icon {
-      position: absolute;
-      left: 16px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: clamp(15px, 1.6vw, 18px);
-      color: var(--muted);
-      pointer-events: none;
-    }
     #menuSearch {
       width: 100%;
       height: clamp(46px, 5.5vh, 52px);
       min-height: 46px;
-      padding: 0 16px 0 46px;
+      padding: 0 16px;
       border-radius: 16px;
       border: 1.5px solid #ddd9ee;
       background: white;
@@ -1550,33 +1541,135 @@
       gap: 6px;
       width: 100%;
     }
-    .addon-dropdown-wrap {
-      width: 100%;
-      background: #fdfcff;
-      border: 1.5px dashed var(--primary);
-      border-radius: 10px;
-      padding: 8px 12px;
-      box-sizing: border-box;
-    }
-    .addon-dropdown-wrap.hidden {
-      display: none !important;
-    }
-    .addon-ingredient-select {
-      width: 100%;
-      padding: 8px 10px;
-      min-height: 40px;
-      border-radius: 8px;
-      border: 1.5px solid #d4cde8;
-      font-size: 13px;
-      font-weight: 600;
-      background: white;
-      color: var(--text);
-      font-family: var(--sans);
-      outline: none;
+    .addon-question-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       cursor: pointer;
     }
-    .addon-ingredient-select:focus {
-      border-color: var(--primary);
+    .addon-question-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .addon-question-sub {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.3;
+    }
+    .addon-toggle-group {
+      display: inline-flex;
+      background: white;
+      border: 1.5px solid #ddd9ee;
+      border-radius: 50px;
+      padding: 3px;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .addon-toggle-pill {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 800;
+      padding: 6px 14px;
+      border-radius: 50px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+    .addon-toggle-pill.active {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 2px 8px rgba(137, 87, 204, 0.28);
+    }
+    .addon-options-dropdown {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed rgba(137, 87, 204, 0.25);
+      animation: fadeIn 0.2s ease;
+    }
+    .addon-options-dropdown.hidden {
+      display: none !important;
+    }
+
+    /* ══════════════════════════════
+       KIOSK CLOSED / UNAVAILABLE OVERLAY
+    ══════════════════════════════ */
+    .kiosk-closed-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9000;
+      background: linear-gradient(145deg, #4B258A 0%, #6E3EB8 50%, #8957CC 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: clamp(20px, 4vw, 48px);
+      text-align: center;
+    }
+    .kiosk-closed-overlay.hidden {
+      display: none !important;
+    }
+    .kiosk-closed-card {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1.5px solid rgba(255, 255, 255, 0.22);
+      backdrop-filter: blur(12px);
+      border-radius: 32px;
+      padding: clamp(28px, 5vh, 52px) clamp(22px, 4vw, 48px);
+      max-width: min(520px, 92vw);
+      width: 100%;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .kiosk-closed-logo {
+      width: clamp(80px, 13vw, 116px);
+      height: clamp(80px, 13vw, 116px);
+      border-radius: 50%;
+      overflow: hidden;
+      margin-bottom: 18px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+    }
+    .kiosk-closed-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .kiosk-closed-badge {
+      background: #E53935;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      padding: 6px 16px;
+      border-radius: 50px;
+      margin-bottom: 14px;
+      box-shadow: 0 4px 14px rgba(229, 57, 53, 0.4);
+    }
+    .kiosk-closed-title {
+      font-family: var(--serif);
+      font-size: clamp(28px, 5vw, 44px);
+      color: #ffffff;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 14px;
+    }
+    .kiosk-closed-divider {
+      width: 56px;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.35);
+      border-radius: 3px;
+      margin-bottom: 16px;
+    }
+    .kiosk-closed-msg {
+      color: rgba(255, 255, 255, 0.9);
+      font-size: clamp(14px, 1.8vw, 16px);
+      line-height: 1.6;
+      max-width: 420px;
     }
 
     .nickname-input:disabled,

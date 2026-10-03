@@ -498,13 +498,76 @@ async function refreshInventoryStock() {
   }
 }
 
-// Real-time listener for database stock, recipe & category updates
+// ─── KIOSK AVAILABILITY (chill_kiosk_settings.is_open) ────────────────────────
+let IS_KIOSK_OPEN = true;
+
+function applyKioskOpenState(isOpen) {
+  IS_KIOSK_OPEN = Boolean(isOpen);
+  const closedOverlay = document.getElementById('kioskClosedOverlay');
+  const startBtn = document.getElementById('startBtn');
+  const placeBtn = document.getElementById('placeOrderBtn');
+
+  if (!IS_KIOSK_OPEN) {
+    if (closedOverlay) closedOverlay.classList.remove('hidden');
+    if (startBtn) {
+      startBtn.disabled = true;
+      startBtn.textContent = 'Currently Closed';
+    }
+    if (placeBtn) placeBtn.disabled = true;
+    const prodModal = document.getElementById('confirmation-overlay');
+    if (prodModal) prodModal.classList.add('hidden');
+    if (typeof closeQuiz === 'function') closeQuiz();
+  } else {
+    if (closedOverlay) closedOverlay.classList.add('hidden');
+    if (startBtn) {
+      startBtn.disabled = false;
+      startBtn.textContent = 'Tap to Order →';
+    }
+    if (typeof checkOrderValidation === 'function') checkOrderValidation();
+  }
+}
+
+async function checkKioskSettings() {
+  if (!db) return;
+  try {
+    let settingsRow = null;
+    const { data, error } = await db
+      .from('chill_kiosk_settings')
+      .select('*')
+      .limit(1);
+
+    if (!error && data && data.length > 0) {
+      settingsRow = data[0];
+    } else {
+      const { data: fallbackData, error: fallbackErr } = await db
+        .from('kiosk_setting')
+        .select('*')
+        .limit(1);
+      if (!fallbackErr && fallbackData && fallbackData.length > 0) {
+        settingsRow = fallbackData[0];
+      }
+    }
+
+    if (settingsRow && settingsRow.is_open !== undefined && settingsRow.is_open !== null) {
+      const rawVal = settingsRow.is_open;
+      const isOpen = !(rawVal === false || rawVal === 0 || String(rawVal).trim().toLowerCase() === 'false' || String(rawVal).trim() === '0');
+      applyKioskOpenState(isOpen);
+    }
+  } catch (err) {
+    console.warn("Could not check kiosk settings:", err);
+  }
+}
+
+// Real-time listener for database stock, recipe, category & kiosk settings updates
 let realtimeStockListenerInitialized = false;
 function initRealtimeStockListener() {
   if (!db || realtimeStockListenerInitialized) return;
   realtimeStockListenerInitialized = true;
   try {
     db.channel('public:chill_stock_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_kiosk_settings' }, () => {
+        checkKioskSettings();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_ingredient' }, () => {
         refreshInventoryStock();
       })
@@ -529,7 +592,10 @@ function initRealtimeStockListener() {
   }
 
   // Periodic polling every 10s as a failsafe
-  setInterval(refreshInventoryStock, 10000);
+  setInterval(() => {
+    checkKioskSettings();
+    refreshInventoryStock();
+  }, 10000);
 }
 
 // ═════════════════════════════════════════
@@ -542,6 +608,9 @@ async function loadMenuFromSupabase() {
   }
   
   try {
+    // Step 0: Check kiosk availability setting first
+    await checkKioskSettings();
+
     // Step 1: Load Product categories from database first (excluding Supply, Ingredient, and Add-ons)
     await loadCategoriesFromSupabase();
 
@@ -1201,6 +1270,10 @@ function buildGrids() {
 let cur = 'welcomeScreen';
 
 function goTo(id) {
+  if (!IS_KIOSK_OPEN && id !== 'welcomeScreen') {
+    applyKioskOpenState(false);
+    return;
+  }
   if (id === cur) return;
   const prev = document.getElementById(cur);
   const next = document.getElementById(id);
@@ -1211,7 +1284,10 @@ function goTo(id) {
   cur = id;
   next.scrollTo(0, 0);
   if (id === 'cartScreen') renderCart();
-  if (id === 'menuScreen') refreshInventoryStock();
+  if (id === 'menuScreen') {
+    checkKioskSettings();
+    refreshInventoryStock();
+  }
 }
 
 function addItem(name, imageUrl, price, desc, details = {}) {
@@ -1439,6 +1515,10 @@ function getUniqueRandomOrderNumber() {
 // 5. PLACE ORDER & SYNC TO CHILL_KIOSK_QUEUE (FAST)
 // ═════════════════════════════════════════
 async function placeOrder() {
+  if (!IS_KIOSK_OPEN) {
+    applyKioskOpenState(false);
+    return;
+  }
   if (!cart.length) return;
   const nicknameInput = document.getElementById('customerNickname').value.trim();
   if (nicknameInput.length < 3) {
@@ -2052,83 +2132,84 @@ function triggerConfirmation(item) {
   // Dynamic Add-ons from chill_addons, chill_product_addons & chill_addon_recipe
   selectedAddons = [];
   const addonSection = document.getElementById('modal-addon-section');
+  const addonOptionsWrap = document.getElementById('modal-addon-options-wrap');
   const addonOptionsContainer = document.getElementById('modal-addon-options');
+  const addonToggleNo = document.getElementById('addon-toggle-no');
+  const addonToggleYes = document.getElementById('addon-toggle-yes');
+  const addonQuestionBar = document.getElementById('addon-question-bar');
   const itemAddons = item.addons || [];
 
   if (itemAddons.length > 0 && addonSection && addonOptionsContainer) {
     addonSection.classList.remove('hidden');
-    
-    let addonBtnsHtml = `
-      <div class="addon-row-wrapper">
-        <button class="addon-btn active" data-addon="none">
-          <span>None</span>
-          <span style="font-size:12px;opacity:0.8;">₱0</span>
-        </button>
-      </div>
-    `;
-    
+
+    // Default to "No" (collapsed) so the modal stays clean and uncrowded
+    if (addonOptionsWrap) addonOptionsWrap.classList.add('hidden');
+    if (addonToggleNo) addonToggleNo.classList.add('active');
+    if (addonToggleYes) {
+      addonToggleYes.classList.remove('active');
+      addonToggleYes.textContent = 'Yes ▾';
+    }
+
+    let addonBtnsHtml = '';
     itemAddons.forEach(a => {
       const priceText = a.price > 0 ? `+₱${a.price}` : 'Free';
-      const aName = a.addonsName || '';
-      const isSyrupOrPowder = (a.addonsId === 3) || /syrup|sauce|powder/i.test(aName);
       const subRecipes = (ALL_ADDON_RECIPES[a.addonsId] || []);
 
-      // Check if addon single ingredient is out of stock
-      let isAddonOOS = false;
-      if (!isSyrupOrPowder && subRecipes.length === 1) {
-        if (OOS_INGREDIENT_IDS.has(subRecipes[0].ingredientId)) isAddonOOS = true;
-      }
+      // Check if any ingredient required by this addon is out of stock
+      const isAddonOOS = subRecipes.length > 0 && subRecipes.some(sr => OOS_INGREDIENT_IDS.has(sr.ingredientId));
 
-      if (isSyrupOrPowder && subRecipes.length > 0) {
-        // Dropdown container for syrup/sauce/powder varieties
-        const optionsHtml = subRecipes.map(sr => {
-          const isIngOOS = OOS_INGREDIENT_IDS.has(sr.ingredientId);
-          return `<option value="${sr.ingredientName}" ${isIngOOS ? 'disabled' : ''}>${sr.ingredientName}${isIngOOS ? ' (Out of Stock)' : ''}</option>`;
-        }).join('');
-
-        addonBtnsHtml += `
-          <div class="addon-row-wrapper" data-addon-id="${a.addonsId}">
-            <button class="addon-btn" data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}" data-has-dropdown="true">
-              <span>${a.addonsName}</span>
-              <span>${priceText}</span>
-            </button>
-            <div class="addon-dropdown-wrap hidden" id="addon-dropdown-${a.addonsId}">
-              <div style="font-size: 11px; font-weight: 700; color: var(--primary); margin-bottom: 4px;">Choose Flavor / Variety:</div>
-              <select class="addon-ingredient-select" id="addon-select-${a.addonsId}">
-                ${optionsHtml}
-              </select>
-            </div>
-          </div>
-        `;
-      } else {
-        addonBtnsHtml += `
-          <div class="addon-row-wrapper" data-addon-id="${a.addonsId}">
-            <button class="addon-btn ${isAddonOOS ? 'disabled' : ''}" ${isAddonOOS ? 'disabled' : ''} data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}">
-              <span>${a.addonsName}${isAddonOOS ? ' (Out of Stock)' : ''}</span>
-              <span>${priceText}</span>
-            </button>
-          </div>
-        `;
-      }
+      addonBtnsHtml += `
+        <div class="addon-row-wrapper" data-addon-id="${a.addonsId}">
+          <button type="button" class="addon-btn ${isAddonOOS ? 'disabled' : ''}" ${isAddonOOS ? 'disabled' : ''} data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}">
+            <span>${a.addonsName}${isAddonOOS ? ' (Out of Stock)' : ''}</span>
+            <span>${priceText}</span>
+          </button>
+        </div>
+      `;
     });
 
     addonOptionsContainer.innerHTML = addonBtnsHtml;
 
-    const noneBtn = addonOptionsContainer.querySelector('.addon-btn[data-addon="none"]');
-    const customBtns = addonOptionsContainer.querySelectorAll('.addon-btn:not([data-addon="none"])');
+    const customBtns = addonOptionsContainer.querySelectorAll('.addon-btn');
 
-    if (noneBtn) {
-      noneBtn.addEventListener('click', () => {
+    const setAddonsExpanded = (wantAddons) => {
+      if (wantAddons) {
+        if (addonToggleYes) {
+          addonToggleYes.classList.add('active');
+          addonToggleYes.textContent = 'Yes ▴';
+        }
+        if (addonToggleNo) addonToggleNo.classList.remove('active');
+        if (addonOptionsWrap) addonOptionsWrap.classList.remove('hidden');
+      } else {
+        if (addonToggleNo) addonToggleNo.classList.add('active');
+        if (addonToggleYes) {
+          addonToggleYes.classList.remove('active');
+          addonToggleYes.textContent = 'Yes ▾';
+        }
+        if (addonOptionsWrap) addonOptionsWrap.classList.add('hidden');
         selectedAddons = [];
-        customBtns.forEach(b => {
-          b.classList.remove('active');
-          const dId = b.dataset.addonId;
-          const drop = document.getElementById(`addon-dropdown-${dId}`);
-          if (drop) drop.classList.add('hidden');
-        });
-        noneBtn.classList.add('active');
+        customBtns.forEach(b => b.classList.remove('active'));
         updateModalPrice();
-      });
+      }
+    };
+
+    if (addonToggleNo) {
+      addonToggleNo.onclick = (e) => {
+        e.stopPropagation();
+        setAddonsExpanded(false);
+      };
+    }
+    if (addonToggleYes) {
+      addonToggleYes.onclick = (e) => {
+        e.stopPropagation();
+        setAddonsExpanded(true);
+      };
+    }
+    if (addonQuestionBar) {
+      addonQuestionBar.onclick = () => {
+        const isCurrentlyOpen = addonOptionsWrap && !addonOptionsWrap.classList.contains('hidden');
+        setAddonsExpanded(!isCurrentlyOpen);
+      };
     }
 
     customBtns.forEach(btn => {
@@ -2137,43 +2218,21 @@ function triggerConfirmation(item) {
         const aId = Number(btn.dataset.addonId);
         const aName = btn.dataset.name;
         const aPrice = parseFloat(btn.dataset.price) || 0;
-        const hasDropdown = btn.dataset.hasDropdown === 'true';
-        const dropdownWrap = document.getElementById(`addon-dropdown-${aId}`);
-        const selectEl = document.getElementById(`addon-select-${aId}`);
 
         const existingIdx = selectedAddons.findIndex(a => a.addonsId === aId);
         if (existingIdx >= 0) {
           selectedAddons.splice(existingIdx, 1);
           btn.classList.remove('active');
-          if (dropdownWrap) dropdownWrap.classList.add('hidden');
         } else {
-          const subChoice = (hasDropdown && selectEl) ? selectEl.value : null;
-          selectedAddons.push({ addonsId: aId, addonsName: aName, price: aPrice, subSelection: subChoice });
+          selectedAddons.push({ addonsId: aId, addonsName: aName, price: aPrice, subSelection: null });
           btn.classList.add('active');
-          if (dropdownWrap) dropdownWrap.classList.remove('hidden');
-        }
-
-        if (selectedAddons.length === 0) {
-          if (noneBtn) noneBtn.classList.add('active');
-        } else {
-          if (noneBtn) noneBtn.classList.remove('active');
         }
         updateModalPrice();
       });
     });
-
-    // Handle flavor change in dropdown
-    addonOptionsContainer.querySelectorAll('.addon-ingredient-select').forEach(sel => {
-      sel.addEventListener('change', (e) => {
-        const aId = Number(e.target.id.replace('addon-select-', ''));
-        const found = selectedAddons.find(a => a.addonsId === aId);
-        if (found) {
-          found.subSelection = e.target.value;
-        }
-      });
-    });
   } else {
     if (addonSection) addonSection.classList.add('hidden');
+    if (addonOptionsWrap) addonOptionsWrap.classList.add('hidden');
     if (addonOptionsContainer) addonOptionsContainer.innerHTML = '';
   }
 
@@ -2847,8 +2906,9 @@ function selectQuizRecommendation(productId) {
 window.handleQuizAnswer = handleQuizAnswer;
 window.selectQuizRecommendation = selectQuizRecommendation;
 
-// Trigger promo loading, quiz & realtime stock sync on boot
+// Trigger promo loading, quiz, kiosk settings & realtime stock sync on boot
 document.addEventListener('DOMContentLoaded', () => {
+  checkKioskSettings();
   loadPromosFromSupabase();
   initVirtualBaristaQuiz();
   initRealtimeStockListener();

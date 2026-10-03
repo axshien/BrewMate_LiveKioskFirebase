@@ -6,9 +6,24 @@
   <title>ChillVentoryx Kiosk — Responsive Ordering System</title>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
-  <link rel="stylesheet" href="style.css?v=1006">
+  <link rel="stylesheet" href="style.css?v=1007">
 </head>
 <body>
+
+<!-- ══ KIOSK CLOSED / UNAVAILABLE OVERLAY ══ -->
+<div id="kioskClosedOverlay" class="kiosk-closed-overlay hidden" aria-live="polite">
+  <div class="kiosk-closed-card">
+    <div class="kiosk-closed-logo">
+      <img src="chilltop.png" alt="Chilltop Logo" onerror="this.style.display='none'">
+    </div>
+    <div class="kiosk-closed-badge">Currently Unavailable</div>
+    <h1 class="kiosk-closed-title">We're Currently Closed</h1>
+    <div class="kiosk-closed-divider"></div>
+    <p class="kiosk-closed-msg">
+      Sorry, the ChillVentoryx self-service kiosk is currently closed and unavailable for ordering right now. Please approach the counter or check back with us later!
+    </p>
+  </div>
+</div>
 
 <!-- ══ WELCOME ══ -->
 <div class="screen active" id="welcomeScreen">
@@ -53,7 +68,6 @@
 
     <!-- Pills -->
     <div class="search-container">
-      <span class="search-icon">🔍</span>
       <input type="text" id="menuSearch" placeholder="Search menu, categories, or tags..." autocomplete="off">
     </div>
 
@@ -65,7 +79,6 @@
       <div class="section-hd"><h3>Search Results</h3></div>
       <div id="searchResultsGrid" class="items-grid"></div>
       <div id="noResultsMsg" class="empty-state hidden">
-        <div class="empty-icon">🔍</div>
         <p>Item doesn't exist</p>
       </div>
     </div>
@@ -316,9 +329,18 @@
     </div>
 
     <div class="addon-section" id="modal-addon-section">
-      <div class="addon-label">Add-ons</div>
-      <div class="addon-options" id="modal-addon-options">
-        <button class="addon-btn active" data-addon="none" data-price="0">None</button>
+      <div class="addon-question-bar" id="addon-question-bar">
+        <div class="addon-question-text">
+          <div class="addon-label" style="margin-bottom: 2px;">Add-ons</div>
+          <div class="addon-question-sub">Would you like to add any add-ons?</div>
+        </div>
+        <div class="addon-toggle-group" role="group" aria-label="Would you like add-ons?">
+          <button type="button" class="addon-toggle-pill active" id="addon-toggle-no">No</button>
+          <button type="button" class="addon-toggle-pill" id="addon-toggle-yes">Yes ▾</button>
+        </div>
+      </div>
+      <div class="addon-options-dropdown hidden" id="modal-addon-options-wrap">
+        <div class="addon-options" id="modal-addon-options"></div>
       </div>
     </div>
 
@@ -374,6 +396,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="script.js?v=1006"></script>
+<script src="script.js?v=1007"></script>
 </body>
 </html>
