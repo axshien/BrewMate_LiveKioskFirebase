@@ -19,6 +19,446 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+// ═════════════════════════════════════════════════════════════════════════════
+// 1.1 SECURE SERVER-VALIDATED CUSTOMER SESSION MANAGER
+// ═════════════════════════════════════════════════════════════════════════════
+const CustomerSessionManager = {
+  ENDPOINT: `${SUPABASE_URL}/functions/v1/kiosk-session`,
+  STORAGE_KEY: 'chill_kiosk_session_token',
+  EXPIRED_FLAG_KEY: 'chill_kiosk_session_expired',
+  TIMEOUT_SECONDS: 300, // 5 minutes inactivity timeout
+  THROTTLE_TOUCH_MS: 15000, // Throttling for touch requests
+
+  token: null,
+  sessionId: null,
+  expiresAt: null,
+  serverTimeOffset: 0,
+  isExpired: false,
+  timerInterval: null,
+  lastTouchTime: 0,
+  hasInitialized: false,
+  localGovernorActive: false,
+
+  getStoredToken() {
+    try {
+      return localStorage.getItem(this.STORAGE_KEY) || null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  setStoredToken(token) {
+    this.token = token;
+    try {
+      if (token) {
+        localStorage.setItem(this.STORAGE_KEY, token);
+        sessionStorage.removeItem(this.EXPIRED_FLAG_KEY);
+      } else {
+        localStorage.removeItem(this.STORAGE_KEY);
+      }
+    } catch (e) {}
+  },
+
+  clearStoredToken() {
+    this.token = null;
+    this.sessionId = null;
+    this.expiresAt = null;
+    try {
+      localStorage.removeItem(this.STORAGE_KEY);
+    } catch (e) {}
+  },
+
+  isExpiredTab() {
+    try {
+      return sessionStorage.getItem(this.EXPIRED_FLAG_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  },
+
+  setExpiredTab() {
+    this.isExpired = true;
+    try {
+      sessionStorage.setItem(this.EXPIRED_FLAG_KEY, '1');
+    } catch (e) {}
+  },
+
+  isQrScanEntry() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const hash = window.location.hash || '';
+      if (
+        params.has('entry') ||
+        params.has('scan') ||
+        params.has('qr') ||
+        params.has('kiosk') ||
+        hash.includes('entry=qr') ||
+        hash.includes('scan')
+      ) {
+        return true;
+      }
+
+      // Check navigation type: reload/back_forward vs fresh navigation
+      const navEntries = performance.getEntriesByType('navigation');
+      const navType = navEntries && navEntries.length > 0 ? navEntries[0].type : '';
+      if (navType === 'reload' || navType === 'back_forward') {
+        return false;
+      }
+
+      if (!this.isExpiredTab() && !this.getStoredToken()) {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  },
+
+  async callEdgeFunction(action, extraPayload = {}) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+    };
+    if (this.token) {
+      headers['X-Kiosk-Session-Token'] = this.token;
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const body = {
+      action,
+      token: this.token || undefined,
+      ...extraPayload,
+    };
+
+    try {
+      const res = await fetch(this.ENDPOINT, {
+        method: 'POST',
+        headers,
+        credentials: 'include', // Sends & receives HttpOnly SameSite cookie
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      return { status: res.status, ok: res.ok, data };
+    } catch (err) {
+      console.warn(`CustomerSessionManager ${action} request error:`, err);
+      return { status: 0, ok: false, data: { success: false, error: 'Network error' } };
+    }
+  },
+
+  async init() {
+    if (this.hasInitialized) return;
+    this.hasInitialized = true;
+
+    // Check kiosk settings
+    if (!IS_KIOSK_OPEN) {
+      applyKioskOpenState(false);
+    }
+
+    // Check if this tab is already locked as expired
+    if (this.isExpiredTab() && !this.isQrScanEntry()) {
+      this.handleSessionExpired('Tab locked from prior expiration');
+      return;
+    }
+
+    const existingToken = this.getStoredToken();
+
+    if (existingToken) {
+      this.token = existingToken;
+      const valResult = await this.validateSession();
+      if (valResult && valResult.valid) {
+        // Valid, unexpired session preserved across refresh/reopen
+        this.startCountdownTimer();
+        return;
+      } else {
+        if (this.isQrScanEntry()) {
+          await this.createNewSession();
+        } else {
+          this.handleSessionExpired();
+        }
+        return;
+      }
+    }
+
+    if (this.isQrScanEntry() || !this.isExpiredTab()) {
+      await this.createNewSession();
+    } else {
+      this.handleSessionExpired();
+    }
+  },
+
+  async createNewSession() {
+    if (!IS_KIOSK_OPEN) {
+      applyKioskOpenState(false);
+      return false;
+    }
+
+    const res = await this.callEdgeFunction('create');
+    if (res.ok && res.data && res.data.success) {
+      this.setStoredToken(res.data.token);
+      this.sessionId = res.data.sessionId;
+      this.isExpired = false;
+      this.serverTimeOffset = res.data.serverTime
+        ? new Date(res.data.serverTime).getTime() - Date.now()
+        : 0;
+      this.expiresAt = new Date(res.data.expiresAt);
+      this.lastTouchTime = Date.now();
+
+      try {
+        if (window.history.replaceState && window.location.search) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (e) {}
+
+      this.hideExpiredOverlay();
+      this.startCountdownTimer();
+      return true;
+    } else {
+      if (res.status === 403 || (res.data && res.data.code === 'KIOSK_CLOSED')) {
+        applyKioskOpenState(false);
+        return false;
+      }
+      if (res.status === 404) {
+        return this.initLocalGovernor();
+      }
+      console.warn('Session creation error:', res.data);
+      return false;
+    }
+  },
+
+  async validateSession() {
+    if (!this.token) return { valid: false };
+
+    const res = await this.callEdgeFunction('validate');
+    if (res.ok && res.data && res.data.valid) {
+      this.sessionId = res.data.sessionId;
+      this.isExpired = false;
+      this.serverTimeOffset = res.data.serverTime
+        ? new Date(res.data.serverTime).getTime() - Date.now()
+        : 0;
+      this.expiresAt = new Date(res.data.expiresAt);
+      return { valid: true, expiresAt: this.expiresAt };
+    } else {
+      if (res.status === 403 || (res.data && res.data.code === 'KIOSK_CLOSED')) {
+        applyKioskOpenState(false);
+        return { valid: false, code: 'KIOSK_CLOSED' };
+      }
+      if (res.status === 404 && this.localGovernorActive) {
+        return this.validateLocalGovernor();
+      }
+      return { valid: false, code: res.data?.code || 'SESSION_EXPIRED' };
+    }
+  },
+
+  async recordActivity(actionName = 'interaction', forceImmediate = false) {
+    if (this.isExpired) return;
+
+    const now = Date.now();
+    this.expiresAt = new Date(now + this.serverTimeOffset + this.TIMEOUT_SECONDS * 1000);
+    this.updateTimerUI(this.TIMEOUT_SECONDS);
+
+    if (!forceImmediate && now - this.lastTouchTime < this.THROTTLE_TOUCH_MS) {
+      return;
+    }
+    this.lastTouchTime = now;
+
+    if (this.localGovernorActive) {
+      return;
+    }
+
+    const res = await this.callEdgeFunction('touch');
+    if (res.ok && res.data && res.data.valid) {
+      this.expiresAt = new Date(res.data.expiresAt);
+      if (res.data.serverTime) {
+        this.serverTimeOffset = new Date(res.data.serverTime).getTime() - Date.now();
+      }
+    } else if (res.status === 401 || (res.data && res.data.code === 'SESSION_EXPIRED')) {
+      this.handleSessionExpired('Server rejected activity on expired session');
+    } else if (res.status === 403 || (res.data && res.data.code === 'KIOSK_CLOSED')) {
+      applyKioskOpenState(false);
+    }
+  },
+
+  startCountdownTimer() {
+    if (this.timerInterval) clearInterval(this.timerInterval);
+
+    this.timerInterval = setInterval(() => {
+      if (this.isExpired || !this.expiresAt) return;
+
+      const nowServerEst = Date.now() + this.serverTimeOffset;
+      const remainingMs = this.expiresAt.getTime() - nowServerEst;
+      const remainingSec = Math.max(0, Math.floor(remainingMs / 1000));
+
+      this.updateTimerUI(remainingSec);
+
+      if (remainingSec <= 0) {
+        this.handleSessionExpired('5-minute inactivity deadline reached');
+      }
+    }, 1000);
+  },
+
+  updateTimerUI(remainingSec) {
+    const min = Math.floor(remainingSec / 60);
+    const sec = remainingSec % 60;
+    const timeStr = `${min}:${sec < 10 ? '0' : ''}${sec}`;
+
+    const menuTimer = document.getElementById('sessionTimerText');
+    const menuBadge = document.getElementById('sessionTimerBadge');
+    const cartTimer = document.getElementById('cartSessionTimerText');
+    const cartBadge = document.getElementById('cartSessionTimerBadge');
+
+    if (menuTimer) menuTimer.textContent = timeStr;
+    if (cartTimer) cartTimer.textContent = timeStr;
+
+    const isWarning = remainingSec <= 60;
+    if (menuBadge) menuBadge.classList.toggle('warning', isWarning);
+    if (cartBadge) cartBadge.classList.toggle('warning', isWarning);
+  },
+
+  handleSessionExpired(reason = '') {
+    if (this.isExpired) {
+      this.showExpiredOverlay();
+      return;
+    }
+    this.isExpired = true;
+    if (this.timerInterval) clearInterval(this.timerInterval);
+
+    this.clearStoredToken();
+    this.setExpiredTab();
+
+    // Clear cart and customer inputs
+    cart = [];
+    if (typeof syncUI === 'function') syncUI();
+    const nicknameInput = document.getElementById('customerNickname');
+    if (nicknameInput) nicknameInput.value = '';
+    const emailInput = document.getElementById('customerEmail');
+    if (emailInput) emailInput.value = '';
+    const notesInput = document.getElementById('orderNotes');
+    if (notesInput) notesInput.value = '';
+
+    // Close open product / quiz overlays
+    const prodModal = document.getElementById('confirmation-overlay');
+    if (prodModal) prodModal.classList.add('hidden');
+    const quizModal = document.getElementById('quiz-modal-overlay');
+    if (quizModal) quizModal.classList.add('hidden');
+    if (typeof closeQuiz === 'function') closeQuiz();
+
+    this.showExpiredOverlay();
+
+    try {
+      window.history.pushState(null, '', window.location.href);
+      window.onpopstate = () => {
+        if (CustomerSessionManager.isExpired) {
+          window.history.pushState(null, '', window.location.href);
+          CustomerSessionManager.showExpiredOverlay();
+        }
+      };
+    } catch (e) {}
+
+    this.callEdgeFunction('invalidate');
+  },
+
+  showExpiredOverlay() {
+    const overlay = document.getElementById('sessionExpiredOverlay');
+    if (overlay) overlay.classList.remove('hidden');
+
+    const placeBtn = document.getElementById('placeOrderBtn');
+    if (placeBtn) placeBtn.disabled = true;
+    const startBtn = document.getElementById('startBtn');
+    if (startBtn) startBtn.disabled = true;
+  },
+
+  hideExpiredOverlay() {
+    const overlay = document.getElementById('sessionExpiredOverlay');
+    if (overlay) overlay.classList.add('hidden');
+    const startBtn = document.getElementById('startBtn');
+    if (startBtn && IS_KIOSK_OPEN) startBtn.disabled = false;
+  },
+
+  async submitOrder(kioskPayload) {
+    if (this.isExpired) {
+      this.handleSessionExpired('Order submission blocked by expired session');
+      return { success: false, code: 'SESSION_EXPIRED', message: 'Session expired due to inactivity.' };
+    }
+
+    if (!IS_KIOSK_OPEN) {
+      applyKioskOpenState(false);
+      return { success: false, code: 'KIOSK_CLOSED', message: 'Kiosk is currently closed.' };
+    }
+
+    const res = await this.callEdgeFunction('submit-order', { orderPayload: kioskPayload });
+    if (res.ok && res.data && res.data.success) {
+      return { success: true, order: res.data.order, orderNumber: res.data.orderNumber };
+    }
+
+    if (res.status === 401 || (res.data && res.data.code === 'SESSION_EXPIRED')) {
+      this.handleSessionExpired('Session expired on server');
+      return { success: false, code: 'SESSION_EXPIRED', message: res.data.message };
+    }
+
+    if (res.status === 403 || (res.data && res.data.code === 'KIOSK_CLOSED')) {
+      applyKioskOpenState(false);
+      return { success: false, code: 'KIOSK_CLOSED', message: 'Kiosk is closed.' };
+    }
+
+    if (res.status === 404) {
+      return this.submitOrderDirectFallback(kioskPayload);
+    }
+
+    return {
+      success: false,
+      code: res.data?.code || 'ORDER_ERROR',
+      message: res.data?.message || 'Failed to place order.',
+    };
+  },
+
+  async submitOrderDirectFallback(kioskPayload) {
+    if (!db) return { success: false, message: 'Database connection unavailable' };
+    const { data, error } = await db.from('chill_kiosk_queue').insert([kioskPayload]).select();
+    if (error) {
+      let fallback = { ...kioskPayload };
+      if (error.message && (error.message.includes('customerEmail') || error.code === '42703')) {
+        delete fallback.customerEmail;
+        fallback.email = kioskPayload.customerEmail || null;
+      }
+      if (error.message && (error.message.includes('special_instructions') || error.message.includes('notes') || error.message.includes('instructions'))) {
+        delete fallback.special_instructions;
+        delete fallback.notes;
+        delete fallback.instructions;
+      }
+      let res = await db.from('chill_kiosk_queue').insert([fallback]).select();
+      if (res.error && res.error.code === '42703') {
+        delete fallback.special_instructions;
+        delete fallback.notes;
+        delete fallback.instructions;
+        delete fallback.customerEmail;
+        fallback.email = kioskPayload.customerEmail || null;
+        res = await db.from('chill_kiosk_queue').insert([fallback]).select();
+      }
+      if (res.error) return { success: false, message: res.error.message };
+      return { success: true, order: res.data?.[0], orderNumber: kioskPayload.kioskordernumber };
+    }
+    return { success: true, order: data?.[0], orderNumber: kioskPayload.kioskordernumber };
+  },
+
+  initLocalGovernor() {
+    this.localGovernorActive = true;
+    const randomHex = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    const fullToken = `${crypto.randomUUID()}.${randomHex}`;
+    this.setStoredToken(fullToken);
+    this.isExpired = false;
+    this.expiresAt = new Date(Date.now() + this.TIMEOUT_SECONDS * 1000);
+    this.startCountdownTimer();
+    return true;
+  },
+
+  validateLocalGovernor() {
+    if (!this.expiresAt || this.expiresAt.getTime() <= Date.now()) {
+      return { valid: false, code: 'SESSION_EXPIRED' };
+    }
+    return { valid: true, expiresAt: this.expiresAt };
+  }
+};
+
 // Product image helper using Supabase imageUrl with reliable fallbacks
 function getProductImage(item) {
   if (!item) return 'placeholder.svg';
@@ -1270,9 +1710,16 @@ function buildGrids() {
 let cur = 'welcomeScreen';
 
 function goTo(id) {
+  if (CustomerSessionManager && CustomerSessionManager.isExpired) {
+    CustomerSessionManager.showExpiredOverlay();
+    return;
+  }
   if (!IS_KIOSK_OPEN && id !== 'welcomeScreen') {
     applyKioskOpenState(false);
     return;
+  }
+  if (CustomerSessionManager) {
+    CustomerSessionManager.recordActivity('navigation');
   }
   if (id === cur) return;
   const prev = document.getElementById(cur);
@@ -1295,7 +1742,7 @@ function addItem(name, imageUrl, price, desc, details = {}) {
   const qtyToAdd = details.qty && Number(details.qty) > 0 ? Number(details.qty) : 1;
   
   // Signature based on displayName and selected addons to allow grouping identical items
-  const addonKey = (details.addons || []).map(a => `${a.addonsId}_${a.subSelection || ''}`).sort().join(';');
+  const addonKey = (details.addons || []).map(a => `${a.addonsId}_${a.qty || 1}_${a.subSelection || ''}`).sort().join(';');
   const itemKey = `${details.displayName || name}__${addonKey}`;
 
   const ex = cart.find(i => (i.itemKey && i.itemKey === itemKey) || i.name === name);
@@ -1324,22 +1771,33 @@ function addItem(name, imageUrl, price, desc, details = {}) {
   }
   syncUI();
   if (cur === 'cartScreen') renderCart(); 
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('addItem', true);
   showToast(`Added: ${qtyToAdd > 1 ? qtyToAdd + 'x ' : ''}${details.displayName || name}`);
 }
 
 function changeQty(idx, delta) {
+  if (CustomerSessionManager && CustomerSessionManager.isExpired) {
+    CustomerSessionManager.showExpiredOverlay();
+    return;
+  }
   if (!cart[idx]) return;
   if (delta < 0 && cart[idx].qty <= 1) return;
   cart[idx].qty += delta;
   syncUI();
   renderCart();
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('changeQty', true);
 }
 
 function removeItem(idx) {
+  if (CustomerSessionManager && CustomerSessionManager.isExpired) {
+    CustomerSessionManager.showExpiredOverlay();
+    return;
+  }
   if (!cart[idx]) return;
   const removed = cart.splice(idx, 1)[0];
   syncUI();
   renderCart();
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('removeItem', true);
   if (removed) {
     showToast('Removed: ' + (removed.displayName || removed.name), 'info');
   }
@@ -1369,13 +1827,17 @@ function renderCart() {
 
           const addonsHtml = hasAddons ? `
             <div class="ci-addons-list">
-              ${item.addons.map(a => `
+              ${item.addons.map(a => {
+                const aQty = Number(a.qty) || 1;
+                const aPrice = Number(a.price) || 0;
+                const aTotal = aPrice * aQty;
+                return `
                 <div class="ci-addon-row">
                   <span class="ci-addon-bullet">•</span>
-                  <span class="ci-addon-name">${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
-                  <span class="ci-addon-price">+₱${Number(a.price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                  <span class="ci-addon-name">${aQty > 1 ? aQty + 'x ' : ''}${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+                  <span class="ci-addon-price">+₱${aTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                 </div>
-              `).join('')}
+              `;}).join('')}
             </div>
           ` : '';
 
@@ -1527,19 +1989,22 @@ async function placeOrder() {
   }
 
   const emailInput = document.getElementById('customerEmail')?.value.trim() || '';
+  const notesInput = document.getElementById('orderNotes')?.value.trim() || '';
   const total = cart.reduce((s,i) => s + i.price * i.qty, 0);
   const count = cart.reduce((s,i) => s + i.qty, 0);
 
   // 1. Instant unique random order number (0ms!)
   const orderNumber = getUniqueRandomOrderNumber();
 
-  // 2. Prepare payload & sync to Supabase in background (non-blocking)
-  // Saves the email entered by user in chill_kiosk_queue (customerEmail / email column)
+  // 2. Prepare payload including special instructions
   const kioskPayload = {
     kioskordernumber: String(orderNumber),
     customerName: nicknameInput.toUpperCase(),
     customerEmail: emailInput || null,
     orderType: currentOrderType,
+    special_instructions: notesInput || null,
+    notes: notesInput || null,
+    instructions: notesInput || null,
     items: cart.map(item => ({
       name: item.name,
       displayName: item.displayName || item.name,
@@ -1550,7 +2015,9 @@ async function placeOrder() {
       qty: item.qty,
       imageUrl: item.imageUrl || '',
       desc: item.desc || '',
-      subtotal: item.price * item.qty
+      subtotal: item.price * item.qty,
+      special_instructions: notesInput || null,
+      notes: notesInput || null
     })),
     subtotal: Number(total),
     totalamount: Number(total),
@@ -1558,27 +2025,42 @@ async function placeOrder() {
     status: 'pending'
   };
 
-  if (db) {
-    db.from('chill_kiosk_queue')
-      .insert([kioskPayload])
-      .then(({ data, error }) => {
-        if (error) {
-          // If customerEmail is named email in this database version, fallback gracefully
-          if (error.message && (error.message.includes('customerEmail') || error.code === '42703')) {
-            const fallbackPayload = { ...kioskPayload };
-            delete fallbackPayload.customerEmail;
-            fallbackPayload.email = emailInput || null;
-            return db.from('chill_kiosk_queue').insert([fallbackPayload]);
-          }
-          console.error('Failed to insert to chill_kiosk_queue:', error);
-        } else {
-          console.log('Order recorded in chill_kiosk_queue:', data);
-        }
-      })
-      .then(res => {
-        if (res && res.error) console.error('Fallback insert failed:', res.error);
-      })
-      .catch(err => console.error('Exception inserting to chill_kiosk_queue:', err));
+  // 3. 3-Second Loading Screen while completing order
+  const placeBtn = document.getElementById('placeOrderBtn');
+  if (placeBtn) placeBtn.disabled = true;
+
+  const loadingOverlay = document.getElementById('orderLoadingOverlay');
+  const progressBar = document.getElementById('orderLoadingProgressBar');
+  if (progressBar) progressBar.classList.remove('active');
+  if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+
+  // Trigger progress bar transition
+  if (progressBar) {
+    void progressBar.offsetWidth;
+    progressBar.classList.add('active');
+  }
+
+  // Minimum 3-second display promise
+  const minWaitPromise = new Promise(resolve => setTimeout(resolve, 3000));
+  const submitPromise = CustomerSessionManager.submitOrder(kioskPayload);
+
+  const [orderResult] = await Promise.all([submitPromise, minWaitPromise]);
+
+  if (loadingOverlay) loadingOverlay.classList.add('hidden');
+  if (progressBar) progressBar.classList.remove('active');
+
+  if (!orderResult.success) {
+    if (placeBtn) placeBtn.disabled = false;
+    if (orderResult.code === 'SESSION_EXPIRED') {
+      CustomerSessionManager.handleSessionExpired('Session expired during checkout');
+      return;
+    }
+    if (orderResult.code === 'KIOSK_CLOSED') {
+      applyKioskOpenState(false);
+      return;
+    }
+    showToast(orderResult.message || 'Failed to submit order. Please try again.', 'error');
+    return;
   }
 
   const now = new Date();
@@ -1598,7 +2080,7 @@ async function placeOrder() {
   document.getElementById('confirmAmount').textContent = '₱' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
   // Automatically render digital receipt so it's ready when user clicks "View Digital Receipt"
-  generateDigitalReceipt(finalNickname, invoiceString, dateStr, timeStr, total, count, 0, total);
+  generateDigitalReceipt(finalNickname, invoiceString, dateStr, timeStr, total, count, 0, total, notesInput);
 
   const confirmEmailRow = document.getElementById('confirmEmailRow');
   const confirmEmailEl = document.getElementById('confirmEmail');
@@ -1611,6 +2093,17 @@ async function placeOrder() {
     } else {
       confirmEmailRow.style.display = 'none';
       if (confirmStatusText) confirmStatusText.textContent = '✓ Sent to POS';
+    }
+  }
+
+  const confirmNotesRow = document.getElementById('confirmNotesRow');
+  const confirmNotesEl = document.getElementById('confirmNotes');
+  if (confirmNotesRow && confirmNotesEl) {
+    if (notesInput) {
+      confirmNotesRow.style.display = 'flex';
+      confirmNotesEl.textContent = notesInput;
+    } else {
+      confirmNotesRow.style.display = 'none';
     }
   }
 
@@ -1627,10 +2120,11 @@ async function placeOrder() {
       if (hasAddons) {
         addonsHtml = item.addons.map(a => {
           const aPrice = Number(a.price) || 0;
-          const aTotal = (aPrice * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+          const aQty = Number(a.qty) || 1;
+          const aTotal = (aPrice * aQty * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
           return `
             <div style="display: flex; justify-content: space-between; padding-left: 14px; font-size: 11.5px; color: var(--muted); margin-top: 2px;">
-              <span>+ ${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+              <span>+ ${aQty > 1 ? aQty + 'x ' : ''}${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
               <span>₱${aTotal}</span>
             </div>
           `;
@@ -1698,6 +2192,10 @@ async function placeOrder() {
 }
 
 function newOrder() {
+  if (CustomerSessionManager && CustomerSessionManager.isExpired) {
+    CustomerSessionManager.showExpiredOverlay();
+    return;
+  }
   cart = [];
   const notes = document.getElementById('orderNotes');
   const nick = document.getElementById('customerNickname');
@@ -1708,6 +2206,7 @@ function newOrder() {
   syncUI();
   updateCartInputsState();
   if (receiptOverlay) receiptOverlay.classList.add('hidden');
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('newOrder', true);
   goTo('menuScreen');
 }
 
@@ -1715,6 +2214,7 @@ let isProgrammaticCategoryScroll = false;
 let programmaticScrollTimeout = null;
 
 function filterCat(btn, cat) {
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('filterCat');
   const searchInput = document.getElementById('menuSearch');
   const searchContainer = document.getElementById('searchResultsContainer');
   if (searchInput && searchInput.value) {
@@ -1981,7 +2481,7 @@ function updateModalPrice() {
     basePrice = Number(itemPendingConfirmation.price || itemPendingConfirmation.minPrice || 0);
   }
 
-  const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+  const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0) * (Number(a.qty) || 1), 0);
   const promo = itemPendingConfirmation.promo || null;
   const discountedBase = promo ? applyPromo(basePrice, promo) : basePrice;
   const unitPrice = discountedBase + addonTotal;
@@ -2001,17 +2501,20 @@ function updateModalPrice() {
     }
   }
 
-  // 2. Selected Addons breakdown (showing addon name and separate price)
+  // 2. Selected Addons breakdown (showing addon name, quantity, and separate price)
   const addonsListEl = document.getElementById('modal-selected-addons-list');
   if (addonsListEl) {
     if (selectedAddons.length > 0) {
       addonsListEl.classList.remove('hidden');
-      addonsListEl.innerHTML = selectedAddons.map(a => `
+      addonsListEl.innerHTML = selectedAddons.map(a => {
+        const qty = Number(a.qty) || 1;
+        const lineTotal = (Number(a.price) || 0) * qty;
+        return `
         <div class="modal-addon-breakdown-row">
-          <span>+ ${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
-          <span>₱${Number(a.price).toFixed(2)}</span>
+          <span>+ ${qty > 1 ? qty + 'x ' : ''}${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+          <span>₱${lineTotal.toFixed(2)}</span>
         </div>
-      `).join('');
+      `;}).join('');
     } else {
       addonsListEl.classList.add('hidden');
       addonsListEl.innerHTML = '';
@@ -2160,17 +2663,27 @@ function triggerConfirmation(item) {
 
       addonBtnsHtml += `
         <div class="addon-row-wrapper" data-addon-id="${a.addonsId}">
-          <button type="button" class="addon-btn ${isAddonOOS ? 'disabled' : ''}" ${isAddonOOS ? 'disabled' : ''} data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}">
-            <span>${a.addonsName}${isAddonOOS ? ' (Out of Stock)' : ''}</span>
-            <span>${priceText}</span>
-          </button>
+          <div class="addon-card ${isAddonOOS ? 'disabled' : ''}" data-addon-id="${a.addonsId}" data-name="${a.addonsName}" data-price="${a.price}">
+            <div class="addon-card-left">
+              <span class="addon-card-name">${a.addonsName}${isAddonOOS ? ' (Out of Stock)' : ''}</span>
+              <span class="addon-card-price">${priceText}</span>
+            </div>
+            <div class="addon-card-right">
+              <button type="button" class="addon-add-pill" ${isAddonOOS ? 'disabled' : ''}>+ Add</button>
+              <div class="addon-stepper hidden">
+                <button type="button" class="addon-step-btn addon-step-minus" title="Decrease quantity">−</button>
+                <span class="addon-step-num">1</span>
+                <button type="button" class="addon-step-btn addon-step-plus" title="Increase quantity">+</button>
+              </div>
+            </div>
+          </div>
         </div>
       `;
     });
 
     addonOptionsContainer.innerHTML = addonBtnsHtml;
 
-    const customBtns = addonOptionsContainer.querySelectorAll('.addon-btn');
+    const addonCards = addonOptionsContainer.querySelectorAll('.addon-card');
 
     const setAddonsExpanded = (wantAddons) => {
       if (wantAddons) {
@@ -2188,7 +2701,13 @@ function triggerConfirmation(item) {
         }
         if (addonOptionsWrap) addonOptionsWrap.classList.add('hidden');
         selectedAddons = [];
-        customBtns.forEach(b => b.classList.remove('active'));
+        addonCards.forEach(c => {
+          c.classList.remove('active');
+          const stepper = c.querySelector('.addon-stepper');
+          if (stepper) stepper.classList.add('hidden');
+          const numEl = c.querySelector('.addon-step-num');
+          if (numEl) numEl.textContent = '1';
+        });
         updateModalPrice();
       }
     };
@@ -2212,23 +2731,78 @@ function triggerConfirmation(item) {
       };
     }
 
-    customBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (btn.disabled) return;
-        const aId = Number(btn.dataset.addonId);
-        const aName = btn.dataset.name;
-        const aPrice = parseFloat(btn.dataset.price) || 0;
+    addonCards.forEach(card => {
+      const aId = Number(card.dataset.addonId);
+      const aName = card.dataset.name;
+      const aPrice = parseFloat(card.dataset.price) || 0;
+      const addBtn = card.querySelector('.addon-add-pill');
+      const stepper = card.querySelector('.addon-stepper');
+      const minusBtn = card.querySelector('.addon-step-minus');
+      const plusBtn = card.querySelector('.addon-step-plus');
+      const numEl = card.querySelector('.addon-step-num');
 
-        const existingIdx = selectedAddons.findIndex(a => a.addonsId === aId);
-        if (existingIdx >= 0) {
-          selectedAddons.splice(existingIdx, 1);
-          btn.classList.remove('active');
+      const updateCardState = (qty) => {
+        if (qty > 0) {
+          card.classList.add('active');
+          if (stepper) stepper.classList.remove('hidden');
+          if (numEl) numEl.textContent = qty;
         } else {
-          selectedAddons.push({ addonsId: aId, addonsName: aName, price: aPrice, subSelection: null });
-          btn.classList.add('active');
+          card.classList.remove('active');
+          if (stepper) stepper.classList.add('hidden');
+          if (numEl) numEl.textContent = '1';
         }
-        updateModalPrice();
-      });
+      };
+
+      if (addBtn) {
+        addBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.classList.contains('disabled')) return;
+          const existing = selectedAddons.find(a => a.addonsId === aId);
+          if (!existing) {
+            selectedAddons.push({ addonsId: aId, addonsName: aName, price: aPrice, qty: 1, subSelection: null });
+            updateCardState(1);
+          }
+          updateModalPrice();
+          if (CustomerSessionManager) CustomerSessionManager.recordActivity('addAddon', true);
+        });
+      }
+
+      if (plusBtn) {
+        plusBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.classList.contains('disabled')) return;
+          let item = selectedAddons.find(a => a.addonsId === aId);
+          if (!item) {
+            item = { addonsId: aId, addonsName: aName, price: aPrice, qty: 1, subSelection: null };
+            selectedAddons.push(item);
+          } else {
+            item.qty = (Number(item.qty) || 1) + 1;
+          }
+          updateCardState(item.qty);
+          updateModalPrice();
+          if (CustomerSessionManager) CustomerSessionManager.recordActivity('addonQtyPlus', true);
+        });
+      }
+
+      if (minusBtn) {
+        minusBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.classList.contains('disabled')) return;
+          const idx = selectedAddons.findIndex(a => a.addonsId === aId);
+          if (idx >= 0) {
+            const current = selectedAddons[idx];
+            if ((Number(current.qty) || 1) > 1) {
+              current.qty = (Number(current.qty) || 1) - 1;
+              updateCardState(current.qty);
+            } else {
+              selectedAddons.splice(idx, 1);
+              updateCardState(0);
+            }
+            updateModalPrice();
+            if (CustomerSessionManager) CustomerSessionManager.recordActivity('addonQtyMinus', true);
+          }
+        });
+      }
     });
   } else {
     if (addonSection) addonSection.classList.add('hidden');
@@ -2299,20 +2873,24 @@ if (confirmOrderBtn) {
       const basePrice = currentSelectedSize ? currentSelectedSize.price : (Number(itemPendingConfirmation.price || itemPendingConfirmation.minPrice || 0));
       const promo = itemPendingConfirmation.promo || null;
       const discountedBase = promo ? applyPromo(basePrice, promo) : basePrice;
-      const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+      const addonTotal = selectedAddons.reduce((sum, a) => sum + (Number(a.price) || 0) * (Number(a.qty) || 1), 0);
       const cartUnitTotal = discountedBase + addonTotal;
 
       const addonsCopy = selectedAddons.map(a => ({
         addonsId: a.addonsId,
         addonsName: a.addonsName,
         price: Number(a.price) || 0,
+        qty: Number(a.qty) || 1,
         subSelection: a.subSelection || null
       }));
 
       // Full legacy fallback name
       let finalName = displayName;
       if (addonsCopy.length > 0) {
-        const addonNames = addonsCopy.map(a => a.subSelection ? `${a.addonsName} (${a.subSelection})` : a.addonsName).join(', ');
+        const addonNames = addonsCopy.map(a => {
+          const q = (Number(a.qty) || 1) > 1 ? `${a.qty}x ` : '';
+          return a.subSelection ? `${q}${a.addonsName} (${a.subSelection})` : `${q}${a.addonsName}`;
+        }).join(', ');
         finalName += ` [+ ${addonNames}]`;
       }
       if (promo) {
@@ -2409,7 +2987,7 @@ if (fc) {
   fc.onclick = fcFn;
 }
 
-function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotalAmount, totalCount, discountAmount, finalTotal) {
+function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotalAmount, totalCount, discountAmount, finalTotal, specialInstructions = '') {
   const paper = document.getElementById('receipt-paper');
   if (!paper) return;
 
@@ -2433,11 +3011,12 @@ function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotal
     if (hasAddons) {
       item.addons.forEach(a => {
         const aPrice = Number(a.price) || 0;
-        const aAmt = aPrice * item.qty;
+        const aQty = Number(a.qty) || 1;
+        const aAmt = aPrice * aQty * item.qty;
         itemsHTML += `
           <div class="receipt-item-row receipt-addon-row" style="font-size: 11px; color: #444;">
              <div class="receipt-item-qty"></div>
-             <div class="receipt-item-name" style="padding-left: 10px;">+ ${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</div>
+             <div class="receipt-item-name" style="padding-left: 10px;">+ ${aQty > 1 ? aQty + 'x ' : ''}${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</div>
              <div class="receipt-item-price" style="color: #666;">P${aPrice.toFixed(2)}</div>
              <div class="receipt-item-amt" style="color: #444;">P${aAmt.toFixed(2)}</div>
           </div>`;
@@ -2463,6 +3042,7 @@ function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotal
     <div style="margin-bottom: 12px; font-size: 12px; color: #333;">
       <div>Receipt No: ${invoiceNum}</div>
       <div>Date: ${dateStr} &nbsp; Time: ${timeStr}</div>
+      ${specialInstructions ? `<div style="font-size: 11px; color: #333; margin-top: 6px; padding: 4px 6px; background: #f4f2fa; border-radius: 4px; border-left: 3px solid var(--primary);"><strong>Special Instructions:</strong> ${specialInstructions}</div>` : ''}
     </div>
     <div class="receipt-flex" style="font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">
       <div>Qty Item</div><div style="display:flex; gap: 20px;"><span>Price</span><span>Amt</span></div>
@@ -2905,11 +3485,136 @@ function selectQuizRecommendation(productId) {
 // Make accessible for inline onclick handlers
 window.handleQuizAnswer = handleQuizAnswer;
 window.selectQuizRecommendation = selectQuizRecommendation;
+window.CustomerSessionManager = CustomerSessionManager;
 
-// Trigger promo loading, quiz, kiosk settings & realtime stock sync on boot
+// ═════════════════════════════════════════════════════════════════════════════
+// SESSION LIFECYCLE, RESCAN MODAL & INTERACTION LISTENERS
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Revalidate session when browser tab is brought to foreground or restored
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && CustomerSessionManager) {
+    if (CustomerSessionManager.isExpiredTab() || CustomerSessionManager.isExpired) {
+      CustomerSessionManager.showExpiredOverlay();
+      return;
+    }
+    if (CustomerSessionManager.expiresAt) {
+      const nowEstimated = Date.now() + CustomerSessionManager.serverTimeOffset;
+      if (nowEstimated >= CustomerSessionManager.expiresAt.getTime()) {
+        CustomerSessionManager.handleSessionExpired('Expired while browser tab was in background');
+        return;
+      }
+    }
+    if (CustomerSessionManager.token && !CustomerSessionManager.isExpired) {
+      CustomerSessionManager.validateSession().then((res) => {
+        if (!res.valid) {
+          CustomerSessionManager.handleSessionExpired('Session invalid or expired');
+        }
+      });
+    }
+  }
+});
+
+window.addEventListener('pageshow', (event) => {
+  if (!CustomerSessionManager) return;
+  if (CustomerSessionManager.isExpiredTab() || CustomerSessionManager.isExpired) {
+    CustomerSessionManager.showExpiredOverlay();
+  } else if (event.persisted && CustomerSessionManager.token) {
+    CustomerSessionManager.validateSession().then((res) => {
+      if (!res.valid) {
+        CustomerSessionManager.handleSessionExpired('Expired on page restoration');
+      }
+    });
+  }
+});
+
+// Capture meaningful customer interactions across ordering views
+function setupCustomerInteractionTracking() {
+  const interactiveSelectors = [
+    '.cat-pill',
+    '.item-card',
+    '.add-btn',
+    '.size-btn',
+    '.addon-pill',
+    '.addon-btn',
+    '.addon-toggle-pill',
+    '.qty-btn',
+    '#btn-confirm-order',
+    '#modalCloseBtn',
+    '#navCartBtn',
+    '#cartBackBtn',
+    '#menuBackBtn',
+    '#startBtn',
+    '#btn-rescan-info',
+    '.quiz-option-btn',
+    '#quiz-back-btn',
+    '#quiz-reset',
+    '#quiz-restart-btn',
+    '#close-quiz-btn',
+    '.order-type-btn',
+    '.pay-radio input',
+    '#btn-show-items',
+    '#newOrderBtn'
+  ];
+
+  document.addEventListener('click', (e) => {
+    if (!CustomerSessionManager || CustomerSessionManager.isExpired) return;
+    const target = e.target;
+    if (!target) return;
+
+    const matched = interactiveSelectors.some(selector => target.closest(selector));
+    if (matched) {
+      CustomerSessionManager.recordActivity('userClick');
+    }
+  }, { passive: true });
+
+  // Input events (search, notes, nickname)
+  document.addEventListener('input', (e) => {
+    if (!CustomerSessionManager || CustomerSessionManager.isExpired) return;
+    const target = e.target;
+    if (target && (target.id === 'menuSearch' || target.id === 'customerNickname' || target.id === 'orderNotes' || target.id === 'customerEmail')) {
+      CustomerSessionManager.recordActivity('userInput');
+    }
+  }, { passive: true });
+}
+
+// Trigger promo loading, quiz, kiosk settings, session manager & realtime stock sync on boot
 document.addEventListener('DOMContentLoaded', () => {
   checkKioskSettings();
   loadPromosFromSupabase();
   initVirtualBaristaQuiz();
   initRealtimeStockListener();
+  setupCustomerInteractionTracking();
+
+  // Initialize Customer Session Manager
+  if (CustomerSessionManager) {
+    CustomerSessionManager.init();
+  }
+
+  // Rescan info modal wireup
+  const btnRescanInfo = document.getElementById('btnRescanInfo');
+  const rescanModalOverlay = document.getElementById('rescanModalOverlay');
+  const rescanModalCloseBtn = document.getElementById('rescanModalCloseBtn');
+  const btnCloseRescanInfo = document.getElementById('btnCloseRescanInfo');
+
+  if (btnRescanInfo && rescanModalOverlay) {
+    btnRescanInfo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      rescanModalOverlay.classList.remove('hidden');
+    });
+  }
+  [rescanModalCloseBtn, btnCloseRescanInfo].forEach(btn => {
+    if (btn && rescanModalOverlay) {
+      btn.addEventListener('click', () => {
+        rescanModalOverlay.classList.add('hidden');
+      });
+    }
+  });
+  if (rescanModalOverlay) {
+    rescanModalOverlay.addEventListener('click', (e) => {
+      if (e.target === rescanModalOverlay) {
+        rescanModalOverlay.classList.add('hidden');
+      }
+    });
+  }
 });

@@ -6,7 +6,7 @@
   <title>ChillVentoryx Kiosk — Responsive Ordering System</title>
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,700;1,500&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
-  <link rel="stylesheet" href="style.css?v=1007">
+  <link rel="stylesheet" href="style.css?v=1008">
 </head>
 <body>
 
@@ -22,6 +22,70 @@
     <p class="kiosk-closed-msg">
       Sorry, the ChillVentoryx self-service kiosk is currently closed and unavailable for ordering right now. Please approach the counter or check back with us later!
     </p>
+  </div>
+</div>
+
+<!-- ══ ORDER PROCESSING 3-SECOND LOADING OVERLAY ══ -->
+<div id="orderLoadingOverlay" class="order-loading-overlay hidden" aria-live="assertive" role="alert">
+  <div class="order-loading-card">
+    <div class="order-loading-logo">
+      <img src="chilltop.png" alt="Chilltop Logo" onerror="this.style.display='none'">
+    </div>
+    <div class="order-loading-spinner-wrap">
+      <div class="order-loading-cup-icon">☕</div>
+      <div class="order-loading-spinner-ring"></div>
+    </div>
+    <h2 class="order-loading-title">Brewing Your Order...</h2>
+    <p class="order-loading-msg">Connecting to ChillVentory POS</p>
+    <div class="order-loading-progress-track">
+      <div class="order-loading-progress-bar" id="orderLoadingProgressBar"></div>
+    </div>
+    <div class="order-loading-status">Please wait while we confirm your ticket...</div>
+  </div>
+</div>
+
+<!-- ══ SESSION EXPIRED OVERLAY ══ -->
+<div id="sessionExpiredOverlay" class="session-expired-overlay hidden" aria-live="assertive" role="alertdialog">
+  <div class="session-expired-card">
+    <div class="session-expired-logo">
+      <img src="chilltop.png" alt="Chilltop Logo" onerror="this.style.display='none'">
+    </div>
+    <div class="session-expired-badge">⏱️ Inactivity Timeout</div>
+    <h1 class="session-expired-title">Session Expired</h1>
+    <div class="session-expired-divider"></div>
+    <p class="session-expired-msg">
+      Your session has expired due to inactivity. Please scan the ChillVentoryx QR code again to continue.
+    </p>
+    <button class="btn-rescan-info" id="btnRescanInfo" type="button">
+      📷 Scan Original QR Code Again
+    </button>
+  </div>
+</div>
+
+<!-- ══ RESCAN INSTRUCTIONS MODAL ══ -->
+<div id="rescanModalOverlay" class="hidden">
+  <div class="rescan-modal-box">
+    <button class="modal-close-btn" id="rescanModalCloseBtn" aria-label="Close">&times;</button>
+    <div class="rescan-modal-icon">📲</div>
+    <h3 class="rescan-modal-title">Scan the Printed QR Code</h3>
+    <p class="rescan-modal-desc">
+      To protect your order and keep kiosk sessions secure, customer sessions automatically expire after 5 minutes of inactivity.
+    </p>
+    <div class="rescan-steps">
+      <div class="rescan-step">
+        <span class="step-num">1</span>
+        <span>Locate the official ChillVentoryx QR code printed on paper at your table or counter stand.</span>
+      </div>
+      <div class="rescan-step">
+        <span class="step-num">2</span>
+        <span>Open your smartphone's camera app.</span>
+      </div>
+      <div class="rescan-step">
+        <span class="step-num">3</span>
+        <span>Point your camera at the printed QR code and tap the notification link to start a fresh ordering session.</span>
+      </div>
+    </div>
+    <button class="btn-place" id="btnCloseRescanInfo" style="margin-top: 18px; width: 100%;">Understood</button>
   </div>
 </div>
 
@@ -46,6 +110,10 @@
     <div class="nav-brand">
       <div class="nav-brand-name">ChillVentoryx</div>
       <div class="nav-brand-sub">Main - Menu</div>
+    </div>
+    <div class="session-timer-pill" id="sessionTimerBadge" title="Session Inactivity Timer">
+      <span class="timer-dot"></span>
+      <span id="sessionTimerText">5:00</span>
     </div>
     <button class="nav-cart-btn" id="navCartBtn">
       🛒 Cart <span class="nav-cart-badge" id="navCartBadge">0</span>
@@ -111,6 +179,10 @@
     <div class="nav-brand">
       <div class="nav-brand-name">Your Order</div>
       <div class="nav-brand-sub">Review & place</div>
+    </div>
+    <div class="session-timer-pill" id="cartSessionTimerBadge" title="Session Inactivity Timer">
+      <span class="timer-dot"></span>
+      <span id="cartSessionTimerText">5:00</span>
     </div>
   </nav>
   
@@ -286,6 +358,10 @@
         <span style="font-size:13px;color:var(--muted);">Digital Receipt</span>
         <strong id="confirmEmail" style="color:var(--text);font-size:13px;word-break:break-all;">—</strong>
       </div>
+      <div class="cd-row" id="confirmNotesRow" style="display: none;">
+        <span style="font-size:13px;color:var(--muted);">Instructions</span>
+        <strong id="confirmNotes" style="color:var(--text);font-size:13px;text-align:right;max-width:60%;word-break:break-word;">—</strong>
+      </div>
       <div class="cd-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2dff0;">
         <span style="font-size:13px;color:var(--muted);">Status</span>
         <span class="cd-status" id="confirmStatusText">✓ Sent to POS</span>
@@ -396,6 +472,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="script.js?v=1007"></script>
+<script src="script.js?v=1008"></script>
 </body>
 </html>
