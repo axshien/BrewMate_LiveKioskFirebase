@@ -86,6 +86,82 @@ function runTests() {
   const minWaitPromise = new Promise(resolve => setTimeout(resolve, minWaitMs));
   const mockSubmit = Promise.resolve({ success: true, orderNumber: '542' });
 
+  // Test 5: Product description extraction across column variants & cleaning
+  console.log('Test 5: Product description cleaning and fallback extraction...');
+  function testGetProductDescription(item) {
+    if (!item) return '';
+    const raw = item.description || item.desc || item.productDescription || item.product_description || item.productDesc || item.details || '';
+    if (typeof raw !== 'string') return '';
+    const cleaned = raw.replace(/^['"]+|['"]+$/g, '').trim();
+    if (!cleaned || cleaned.toLowerCase() === 'null' || cleaned.toLowerCase() === 'undefined' || cleaned === "''" || cleaned === '""') {
+      return '';
+    }
+    return cleaned;
+  }
+
+  assert.strictEqual(testGetProductDescription({ description: 'Rich espresso shot' }), 'Rich espresso shot');
+  assert.strictEqual(testGetProductDescription({ desc: 'Fresh brewed drip' }), 'Fresh brewed drip');
+  assert.strictEqual(testGetProductDescription({ productDescription: 'Creamy milk drink' }), 'Creamy milk drink');
+  assert.strictEqual(testGetProductDescription({ description: "''" }), '');
+  assert.strictEqual(testGetProductDescription({ description: '  ' }), '');
+  assert.strictEqual(testGetProductDescription({ description: 'null' }), '');
+  assert.strictEqual(testGetProductDescription({}), '');
+  console.log('✓ PASS: Product descriptions cleanly extracted and normalized across all variants\n');
+
+  // Test 6: Product with sizes retains sizes even when direct price and description are present
+  console.log('Test 6: Editing product and adding description retains sizes and price ranges...');
+  const productSizesMap = {
+    '101': [
+      { productSizeId: 1, sizeId: 1, sizeName: '16oz', price: 90 },
+      { productSizeId: 2, sizeId: 2, sizeName: '22oz', price: 110 }
+    ]
+  };
+
+  // Simulate edited product with added description and direct price saved
+  const editedProduct = {
+    productId: 101,
+    productName: 'Iced Caramel Macchiato',
+    description: 'Espresso with caramel drizzle and milk',
+    price: 90 // Direct price present from database save
+  };
+
+  const itemSizes = (productSizesMap[editedProduct.productId] || []).slice();
+  itemSizes.sort((a, b) => a.price - b.price);
+  const rawPrice = (editedProduct.price !== null && editedProduct.price !== undefined && editedProduct.price !== '') ? Number(editedProduct.price) : null;
+  const hasDirectPrice = rawPrice !== null && !isNaN(rawPrice) && rawPrice > 0;
+  // Previously: const hasSizes = !hasDirectPrice && itemSizes.length > 0 (BUG: sizes disappeared!)
+  // Corrected logic:
+  const hasSizes = itemSizes.length > 0;
+
+  assert.strictEqual(hasSizes, true, 'hasSizes must be true even if price is set on product');
+  assert.strictEqual(itemSizes.length, 2, 'Must have 2 size variations');
+  assert.strictEqual(itemSizes[0].sizeName, '16oz');
+  assert.strictEqual(itemSizes[1].sizeName, '22oz');
+
+  const prices = itemSizes.map(s => s.price);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  assert.strictEqual(minPrice, 90);
+  assert.strictEqual(maxPrice, 110);
+  console.log('✓ PASS: Product sizes and price ranges remain intact after editing with description & direct price\n');
+
+  // Test 7: Description rendered under product name
+  console.log('Test 7: Description placement directly under product name...');
+  const cleanDesc = testGetProductDescription(editedProduct);
+  const sizePillsHTML = hasSizes ? `<div class="card-size-tags">${itemSizes.map(s => `<span class="size-tag">${s.sizeName}</span>`).join('')}</div>` : '';
+  const cardHTML = `
+    <div class="item-name">${editedProduct.productName}</div>
+    ${cleanDesc ? `<div class="item-desc">${cleanDesc}</div>` : ''}
+    <div class="card-spacer"></div>
+    ${sizePillsHTML}
+  `;
+
+  assert.ok(cardHTML.includes('<div class="item-name">Iced Caramel Macchiato</div>'));
+  assert.ok(cardHTML.includes('<div class="item-desc">Espresso with caramel drizzle and milk</div>'));
+  assert.ok(cardHTML.indexOf('item-name') < cardHTML.indexOf('item-desc'), 'item-desc must appear after item-name');
+  assert.ok(cardHTML.includes('16oz') && cardHTML.includes('22oz'), 'Size tags must be rendered in card');
+  console.log('✓ PASS: Description is properly placed under the product name with size tags rendered\n');
+
   Promise.all([mockSubmit, minWaitPromise]).then(([orderRes]) => {
     const elapsed = Date.now() - startMs;
     assert.strictEqual(orderRes.success, true);

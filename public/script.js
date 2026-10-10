@@ -491,6 +491,18 @@ function getProductImage(item) {
   return 'placeholder.svg';
 }
 
+// Safely extract and clean product description across schema variants
+function getProductDescription(item) {
+  if (!item) return '';
+  const raw = item.description || item.desc || item.productDescription || item.product_description || item.productDesc || item.details || '';
+  if (typeof raw !== 'string') return '';
+  const cleaned = raw.replace(/^['"]+|['"]+$/g, '').trim();
+  if (!cleaned || cleaned.toLowerCase() === 'null' || cleaned.toLowerCase() === 'undefined' || cleaned === "''" || cleaned === '""') {
+    return '';
+  }
+  return cleaned;
+}
+
 // ─── PROMOTION HELPERS ────────────────────────────────────────────────────────
 // Build PROMO_PRODUCT_IDS from fetched promotion data
 function buildPromoMap(promotions, promoProducts) {
@@ -1020,6 +1032,12 @@ function initRealtimeStockListener() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_product_item' }, () => {
         loadMenuFromSupabase();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_product_size' }, () => {
+        loadMenuFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_size' }, () => {
+        loadMenuFromSupabase();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chill_promotion' }, () => {
         loadPromosFromSupabase();
       })
@@ -1073,32 +1091,32 @@ async function loadMenuFromSupabase() {
     let productSizes = [];
     const { data: psData, error: psError } = await db
       .from('chill_product_size')
-      .select('*')
-      .eq('enabled', 1);
+      .select('*');
     if (!psError && psData) {
-      productSizes = psData;
+      productSizes = psData.filter(ps => ps.enabled === 1 || ps.enable === 1 || ps.enabled === true || ps.enable === true || (ps.enabled === undefined && ps.enable === undefined));
     } else {
       const { data: psData2 } = await db
         .from('chill_product_sizes')
-        .select('*')
-        .eq('enabled', 1);
-      if (psData2) productSizes = psData2;
+        .select('*');
+      if (psData2) {
+        productSizes = psData2.filter(ps => ps.enabled === 1 || ps.enable === 1 || ps.enabled === true || ps.enable === true || (ps.enabled === undefined && ps.enable === undefined));
+      }
     }
 
     // Fetch sizes (with fallback to chill_sizes)
     let sizes = [];
     const { data: sData, error: sError } = await db
       .from('chill_size')
-      .select('*')
-      .eq('enable', 1);
+      .select('*');
     if (!sError && sData) {
-      sizes = sData;
+      sizes = sData.filter(s => s.enable === 1 || s.enabled === 1 || s.enable === true || s.enabled === true || (s.enable === undefined && s.enabled === undefined));
     } else {
       const { data: sData2 } = await db
         .from('chill_sizes')
-        .select('*')
-        .eq('enable', 1);
-      if (sData2) sizes = sData2;
+        .select('*');
+      if (sData2) {
+        sizes = sData2.filter(s => s.enable === 1 || s.enabled === 1 || s.enable === true || s.enabled === true || (s.enable === undefined && s.enabled === undefined));
+      }
     }
 
     // Fetch addons (chill_addons) & product addons (chill_product_addons)
@@ -1156,19 +1174,28 @@ async function loadMenuFromSupabase() {
     // Map sizes by sizeId
     const sizeLookup = {};
     sizes.forEach(s => {
-      sizeLookup[s.sizeId] = s.sizeName;
+      const sId = s.sizeId !== undefined && s.sizeId !== null ? s.sizeId : s.id;
+      const sName = s.sizeName || s.name || `Size ${sId}`;
+      if (sId !== undefined && sId !== null) {
+        sizeLookup[sId] = sName;
+        sizeLookup[String(sId).trim()] = sName;
+      }
     });
 
-    // Map product sizes by productId
+    // Map product sizes by productId (support both numeric and string keys, and product_id alias)
     const productSizesMap = {};
     productSizes.forEach(ps => {
-      if (!productSizesMap[ps.productId]) {
-        productSizesMap[ps.productId] = [];
+      const pId = ps.productId !== undefined && ps.productId !== null ? ps.productId : (ps.product_id !== undefined && ps.product_id !== null ? ps.product_id : null);
+      if (pId === null || pId === undefined) return;
+      const key = String(pId).trim();
+      if (!productSizesMap[key]) {
+        productSizesMap[key] = [];
       }
-      productSizesMap[ps.productId].push({
-        productSizeId: ps.productSizeId,
-        sizeId: ps.sizeId,
-        sizeName: sizeLookup[ps.sizeId] || `Size ${ps.sizeId}`,
+      const sId = ps.sizeId !== undefined && ps.sizeId !== null ? ps.sizeId : (ps.size_id !== undefined && ps.size_id !== null ? ps.size_id : null);
+      productSizesMap[key].push({
+        productSizeId: ps.productSizeId || ps.product_size_id || ps.id,
+        sizeId: sId,
+        sizeName: (sId !== null && sizeLookup[sId]) || ps.sizeName || `Size ${sId || ''}`,
         price: Number(ps.price) || 0
       });
     });
@@ -1239,12 +1266,16 @@ async function loadMenuFromSupabase() {
       });
 
       ALL_ITEMS = validProducts.map(item => {
-        const itemSizes = productSizesMap[item.productId] || [];
+        const pId = item.productId !== undefined && item.productId !== null ? item.productId : (item.id !== undefined && item.id !== null ? item.id : item.uid);
+        const pKey = pId !== undefined && pId !== null ? String(pId).trim() : '';
+        const itemSizes = (productSizesMap[pKey] || productSizesMap[item.productId] || productSizesMap[Number(item.productId)] || []).slice();
         itemSizes.sort((a, b) => a.price - b.price);
 
         const rawPrice = (item.price !== null && item.price !== undefined && item.price !== '') ? Number(item.price) : null;
         const hasDirectPrice = rawPrice !== null && !isNaN(rawPrice) && rawPrice > 0;
-        const hasSizes = !hasDirectPrice && itemSizes.length > 0;
+        // Fix: A product has sizes whenever size options exist in itemSizes.
+        // Having a price set on the product row must NEVER cause its sizes to disappear.
+        const hasSizes = itemSizes.length > 0;
 
         let minPrice = 0;
         let maxPrice = 0;
@@ -1265,7 +1296,7 @@ async function loadMenuFromSupabase() {
             .map(e => ingredientById[e.ingredientId]?.ingredientName)
             .filter(Boolean);
         }
-        const cleanDesc = (item.description || item.desc || '').replace(/^''$/, '').trim();
+        const cleanDesc = getProductDescription(item);
         const recipeText = ingList.length > 0 ? ingList.join(', ') : getProductIngredients(item.productId, productRecipeMap);
         const stockStatus = checkProductStockStatus(
           item,
@@ -1280,6 +1311,7 @@ async function loadMenuFromSupabase() {
 
         return {
           ...item,
+          productId: pId,
           categoryId: catId,
           categoryName: catName,
           catKey: `cat-${catId}`,
@@ -1289,13 +1321,14 @@ async function loadMenuFromSupabase() {
           recipe: recipeText,
           ingredients: ingList,
           sizes: itemSizes,
-          addons: productAddonsMap[item.productId] || [],
+          addons: productAddonsMap[item.productId] || productAddonsMap[pKey] || [],
           hasSizes,
           minPrice,
           maxPrice,
           basePrice: minPrice,
-          price: hasDirectPrice ? rawPrice : minPrice,
+          price: hasSizes ? minPrice : (hasDirectPrice ? rawPrice : minPrice),
           imageUrl: (item.imageUrl || item.image || item.productImage || item.img || item.image_url || '').trim(),
+          recommendationInfo: (item.recommendationInfo || '').replace(/^''$/, '').trim(),
           isOutOfStock: stockStatus.isOutOfStock,
           outOfStockReason: stockStatus.reason,
           promo: null,
@@ -1389,12 +1422,13 @@ function renderTopSellingCard(product) {
   }
   if (featName) featName.textContent = product.productName;
   if (featDesc) {
-    const cleanDesc = (product.description && product.description !== "''") ? product.description : '';
+    const cleanDesc = getProductDescription(product);
     featDesc.textContent = cleanDesc;
     featDesc.style.display = cleanDesc ? 'block' : 'none';
   }
+  const hasItemSizes = (product.hasSizes || (product.sizes && product.sizes.length > 0)) && product.sizes && product.sizes.length > 0;
   if (featPrice) {
-    if (product.hasSizes && product.sizes.length > 0) {
+    if (hasItemSizes) {
       featPrice.textContent = (product.minPrice !== product.maxPrice) 
         ? `₱${product.minPrice} - ₱${product.maxPrice}` 
         : `₱${product.minPrice}`;
@@ -1594,13 +1628,15 @@ function makeCard(item) {
   }
 
   const itemName = item.productName || item.name || 'Unknown Item';
-  const cleanDesc = (item.description && item.description.trim() && item.description.trim() !== "''") ? item.description.trim() : '';
+  const cleanDesc = getProductDescription(item);
   const itemImgSrc = getProductImage(item);
+
+  const hasItemSizes = (item.hasSizes || (item.sizes && item.sizes.length > 0)) && item.sizes && item.sizes.length > 0;
 
   // Build price HTML with promo support
   let priceHTML = '';
   const hasPromo = !!item.promo;
-  if (item.hasSizes && item.sizes && item.sizes.length > 0) {
+  if (hasItemSizes) {
     if (hasPromo) {
       const dispMin = item.promoMinPrice;
       const dispMax = item.promoMaxPrice;
@@ -1624,7 +1660,7 @@ function makeCard(item) {
     ? `<span class="promo-badge-card">${item.promo.discountType === 1 ? `-${item.promo.discountValue}%` : `-₱${item.promo.discountValue}`} ${item.promo.promotionName}</span>`
     : '';
 
-  const sizePillsHTML2 = (item.hasSizes && item.sizes && item.sizes.length > 0)
+  const sizePillsHTML2 = hasItemSizes
     ? `<div class="card-size-tags">${item.sizes.map(s => `<span class="size-tag">${s.sizeName}</span>`).join('')}</div>`
     : '';
 
@@ -2422,7 +2458,7 @@ if (menuSearchInput) {
     let matches = 0;
     ALL_ITEMS.forEach(item => {
       const itemName = item.productName || item.name || '';
-      const itemDesc = item.description || item.desc || '';
+      const itemDesc = getProductDescription(item);
       const catVal = item.cat || '';
       const catName = item.categoryName || '';
       const searchable = removeAccents(`${itemName} ${itemDesc} ${catVal} ${catName} ${item.productId || item.uid}`).toLowerCase();
@@ -2543,7 +2579,7 @@ function triggerConfirmation(item) {
   currentModalQty = 1;
   
   const itemName = item.productName || item.name || 'Café Latte';
-  const cleanDesc = (item.description && item.description.trim() && item.description.trim() !== "''") ? item.description.trim() : '';
+  const cleanDesc = getProductDescription(item);
   const itemRecipe = (item.recipe || '').trim();
   const itemUid = item.productId || item.uid || '—';
 
@@ -2565,7 +2601,7 @@ function triggerConfirmation(item) {
     descEl.style.display = cleanDesc ? 'block' : 'none';
   }
 
-  // Show/hide promo badge in modal
+  // Show/hide promo badge in modal (placed after descEl so description stays directly under product name)
   let promoEl = document.getElementById('modal-promo-label');
   if (item.promo) {
     const pLabel = item.promo.discountType === 1
@@ -2575,8 +2611,14 @@ function triggerConfirmation(item) {
       promoEl = document.createElement('div');
       promoEl.id = 'modal-promo-label';
       promoEl.className = 'modal-promo-label';
-      if (titleEl && titleEl.parentNode) {
+      if (descEl && descEl.parentNode) {
+        descEl.parentNode.insertBefore(promoEl, descEl.nextSibling);
+      } else if (titleEl && titleEl.parentNode) {
         titleEl.parentNode.insertBefore(promoEl, titleEl.nextSibling);
+      }
+    } else {
+      if (descEl && descEl.parentNode && promoEl.nextSibling === descEl) {
+        descEl.parentNode.insertBefore(promoEl, descEl.nextSibling);
       }
     }
     promoEl.textContent = pLabel;
@@ -2598,7 +2640,8 @@ function triggerConfirmation(item) {
   // Dynamic Sizes
   const sizeSection = document.getElementById('modal-size-section');
   const sizeOptionsContainer = document.getElementById('modal-size-options');
-  if (item.hasSizes && item.sizes && item.sizes.length > 0) {
+  const hasItemSizes = (item.hasSizes || (item.sizes && item.sizes.length > 0)) && item.sizes && item.sizes.length > 0;
+  if (hasItemSizes) {
     if (sizeSection) sizeSection.classList.remove('hidden');
     currentSelectedSize = item.sizes[0];
 
@@ -2897,7 +2940,7 @@ if (confirmOrderBtn) {
         finalName += ` [${promo.discountType === 1 ? `-${promo.discountValue}%` : `-₱${promo.discountValue}`} ${promo.promotionName}]`;
       }
 
-      addItem(finalName, getProductImage(itemPendingConfirmation), cartUnitTotal, itemPendingConfirmation.description || itemPendingConfirmation.desc, {
+      addItem(finalName, getProductImage(itemPendingConfirmation), cartUnitTotal, getProductDescription(itemPendingConfirmation), {
         displayName: displayName,
         initialPrice: discountedBase,
         originalBasePrice: basePrice,
@@ -3167,11 +3210,14 @@ async function loadPromosFromSupabase() {
 // 8. VIRTUAL BARISTA 3-LAYER QUIZ & RECOMMENDATIONS
 // ═════════════════════════════════════════
 const QUIZ_STATE = {
-  step: 1, // 1: Drink vs Snack, 2: Temp or Flavor, 3: Taste or Portion
+  step: 1, // 1: Drink vs Snack, 2: Temp or Food Category, 3: Drink Base or Food Flavor, 4: Taste Note or Food Portion
+  totalSteps: 4,
   answers: {
-    type: null,        // 'drink' or 'snack'
-    tempOrFlavor: null,// 'cold' | 'hot' (drink) or 'sweet' | 'savory' | 'meaty' (snack)
-    tasteOrStyle: null // 'sweet' | 'bold' | 'fruity' (drink) or 'bites' | 'meal' | 'crispy' (snack)
+    type: null,           // 'drink' or 'snack'
+    tempOrCategory: null, // 'cold' | 'hot' (drink) or 'waffle' | 'sandwich' | 'snack' | 'meal' | 'any' (food)
+    baseOrFlavor: null,   // 'coffee' | 'blended' | 'tea' | 'matcha_choco' | 'soda' | 'milk_coffee' | 'any' (drink) or 'sweet' | 'savory' | 'meaty' (food)
+    tasteOrStyle: null,   // 'sweet' | 'bold' | 'fruity' | 'chocolate' (drink) or 'bites' | 'meal' | 'crispy' (food)
+    tempOrFlavor: null    // legacy alias for backwards compatibility
   },
   history: []
 };
@@ -3223,7 +3269,13 @@ function closeQuiz() {
 
 function resetQuiz() {
   QUIZ_STATE.step = 1;
-  QUIZ_STATE.answers = { type: null, tempOrFlavor: null, tasteOrStyle: null };
+  QUIZ_STATE.answers = {
+    type: null,
+    tempOrCategory: null,
+    baseOrFlavor: null,
+    tasteOrStyle: null,
+    tempOrFlavor: null
+  };
   QUIZ_STATE.history = [];
 
   const resultsSection = document.getElementById('cravingResultsSection');
@@ -3236,9 +3288,26 @@ function goBackQuizStep() {
   if (QUIZ_STATE.step > 1) {
     QUIZ_STATE.step--;
     QUIZ_STATE.history.pop();
-    if (QUIZ_STATE.step === 1) QUIZ_STATE.answers.type = null;
-    if (QUIZ_STATE.step === 2) QUIZ_STATE.answers.tempOrFlavor = null;
-    if (QUIZ_STATE.step === 3) QUIZ_STATE.answers.tasteOrStyle = null;
+    if (QUIZ_STATE.step === 1) {
+      QUIZ_STATE.answers.type = null;
+      QUIZ_STATE.answers.tempOrCategory = null;
+      QUIZ_STATE.answers.baseOrFlavor = null;
+      QUIZ_STATE.answers.tasteOrStyle = null;
+      QUIZ_STATE.answers.tempOrFlavor = null;
+    } else if (QUIZ_STATE.step === 2) {
+      QUIZ_STATE.answers.tempOrCategory = null;
+      QUIZ_STATE.answers.baseOrFlavor = null;
+      QUIZ_STATE.answers.tasteOrStyle = null;
+      QUIZ_STATE.answers.tempOrFlavor = null;
+    } else if (QUIZ_STATE.step === 3) {
+      QUIZ_STATE.answers.baseOrFlavor = null;
+      QUIZ_STATE.answers.tasteOrStyle = null;
+      if (QUIZ_STATE.answers.type === 'snack') {
+        QUIZ_STATE.answers.tempOrFlavor = null;
+      }
+    } else if (QUIZ_STATE.step === 4) {
+      QUIZ_STATE.answers.tasteOrStyle = null;
+    }
 
     const resultsSection = document.getElementById('cravingResultsSection');
     if (resultsSection) resultsSection.classList.add('hidden');
@@ -3261,83 +3330,216 @@ function renderQuizStep() {
   if (resetBtn) resetBtn.classList.toggle('hidden', QUIZ_STATE.step === 1);
 
   if (QUIZ_STATE.step === 1) {
-    if (badgeEl) badgeEl.textContent = 'Step 1 of 3';
+    if (badgeEl) badgeEl.textContent = 'Step 1 of 4';
     titleEl.textContent = 'What are you in the mood for?';
-    if (hintEl) hintEl.textContent = 'Start by choosing a drink or a snack';
+    if (hintEl) hintEl.textContent = 'Start by choosing a drink or something delicious to eat';
 
     optionsContainer.innerHTML = `
       <button class="craving-btn" onclick="handleQuizAnswer(1, 'drink')">
-        <span>A Drink</span>
+        <span>☕ A Drink</span>
       </button>
       <button class="craving-btn" onclick="handleQuizAnswer(1, 'snack')">
-        <span>A Snack / Food</span>
+        <span>🥪 A Snack / Food</span>
       </button>
     `;
   } else if (QUIZ_STATE.step === 2) {
-    if (badgeEl) badgeEl.textContent = 'Step 2 of 3';
+    if (badgeEl) badgeEl.textContent = 'Step 2 of 4';
 
     if (QUIZ_STATE.answers.type === 'drink') {
-      titleEl.textContent = 'How would you like your drink?';
+      titleEl.textContent = 'How would you like your drink served?';
       if (hintEl) hintEl.textContent = 'Chilled and refreshing, or warm and comforting?';
 
       optionsContainer.innerHTML = `
         <button class="craving-btn" onclick="handleQuizAnswer(2, 'cold')">
-          <span>Cold & Iced</span>
+          <span>🧊 Cold & Iced</span>
         </button>
         <button class="craving-btn" onclick="handleQuizAnswer(2, 'hot')">
-          <span>Warm & Hot</span>
+          <span>☕ Warm & Hot</span>
         </button>
       `;
     } else {
-      titleEl.textContent = 'What flavor are you craving?';
-      if (hintEl) hintEl.textContent = 'Sweet pastries, cheesy savory bites, or hearty meats?';
+      titleEl.textContent = 'What kind of food are you craving?';
+      if (hintEl) hintEl.textContent = 'Matched directly with our kitchen prep and recipe profiles';
 
       optionsContainer.innerHTML = `
-        <button class="craving-btn" onclick="handleQuizAnswer(2, 'sweet')">
-          <span>Sweet Pastry & Waffles</span>
+        <button class="craving-btn" onclick="handleQuizAnswer(2, 'waffle')">
+          <span>🧇 Waffles & Pastries</span>
         </button>
-        <button class="craving-btn" onclick="handleQuizAnswer(2, 'savory')">
-          <span>Cheesy & Savory</span>
+        <button class="craving-btn" onclick="handleQuizAnswer(2, 'sandwich')">
+          <span>🥪 Fresh Sandwiches</span>
         </button>
-        <button class="craving-btn" onclick="handleQuizAnswer(2, 'meaty')">
-          <span>Meaty & Hearty</span>
+        <button class="craving-btn" onclick="handleQuizAnswer(2, 'snack')">
+          <span>🍟 Fries & Finger Bites</span>
+        </button>
+        <button class="craving-btn" onclick="handleQuizAnswer(2, 'meal')">
+          <span>🍛 Rice Meals & Pasta</span>
+        </button>
+        <button class="craving-btn" onclick="handleQuizAnswer(2, 'any')">
+          <span>✨ Surprise Me / Any Food</span>
         </button>
       `;
     }
   } else if (QUIZ_STATE.step === 3) {
-    if (badgeEl) badgeEl.textContent = 'Step 3 of 3';
+    if (badgeEl) badgeEl.textContent = 'Step 3 of 4';
 
     if (QUIZ_STATE.answers.type === 'drink') {
-      const isCold = QUIZ_STATE.answers.tempOrFlavor === 'cold';
-      titleEl.textContent = isCold ? 'What flavor hits the spot?' : 'What warm flavor do you prefer?';
-      if (hintEl) hintEl.textContent = 'Sweet & creamy, strong bold espresso, or light & fruity?';
+      const isHot = QUIZ_STATE.answers.tempOrCategory === 'hot';
+      titleEl.textContent = 'What drink base do you crave?';
+      if (hintEl) hintEl.textContent = 'Based on recommendation profiles from our barista catalog';
+
+      if (isHot) {
+        optionsContainer.innerHTML = `
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'coffee')">
+            <span>☕ Espresso & Brewed Coffee</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'milk_coffee')">
+            <span>🥛 Warm Latte & Milky Coffee</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'matcha_choco')">
+            <span>🍫 Hot Chocolate & Matcha</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'any')">
+            <span>✨ Any Warm Drink</span>
+          </button>
+        `;
+      } else {
+        optionsContainer.innerHTML = `
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'coffee')">
+            <span>☕ Iced Coffee & Latte</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'blended')">
+            <span>🧊 Blended Frappes</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'tea')">
+            <span>🍵 Milk Tea & Fruit Tea</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'matcha_choco')">
+            <span>🍫 Matcha & Chocolate</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'soda')">
+            <span>🫧 Sparkling Fruit Soda</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(3, 'any')">
+            <span>✨ Any Cold Drink</span>
+          </button>
+        `;
+      }
+    } else {
+      titleEl.textContent = 'What flavor hits the spot?';
+      if (hintEl) hintEl.textContent = 'Sweet dessert notes, savory cheese, or hearty meats?';
 
       optionsContainer.innerHTML = `
         <button class="craving-btn" onclick="handleQuizAnswer(3, 'sweet')">
-          <span>Sweet & Creamy</span>
+          <span>🥞 Sweet & Decadent</span>
         </button>
-        <button class="craving-btn" onclick="handleQuizAnswer(3, 'bold')">
-          <span>Strong & Bold Espresso</span>
+        <button class="craving-btn" onclick="handleQuizAnswer(3, 'savory')">
+          <span>🧀 Cheesy & Savory</span>
         </button>
-        <button class="craving-btn" onclick="handleQuizAnswer(3, 'fruity')">
-          <span>Fruity & Zesty</span>
+        <button class="craving-btn" onclick="handleQuizAnswer(3, 'meaty')">
+          <span>🥩 Meaty & Hearty</span>
+        </button>
+      `;
+    }
+  } else if (QUIZ_STATE.step === 4) {
+    if (badgeEl) badgeEl.textContent = 'Step 4 of 4';
+
+    if (QUIZ_STATE.answers.type === 'drink') {
+      titleEl.textContent = 'What flavor note do you prefer?';
+      if (hintEl) hintEl.textContent = 'Find the exact taste note that satisfies your craving';
+
+      optionsContainer.innerHTML = `
+        <button class="craving-btn" onclick="handleQuizAnswer(4, 'sweet')">
+          <span>🍯 Sweet & Creamy</span>
+        </button>
+        <button class="craving-btn" onclick="handleQuizAnswer(4, 'bold')">
+          <span>☕ Strong & Bold Espresso</span>
+        </button>
+        <button class="craving-btn" onclick="handleQuizAnswer(4, 'fruity')">
+          <span>🍓 Fruity & Refreshing</span>
+        </button>
+        <button class="craving-btn" onclick="handleQuizAnswer(4, 'chocolate')">
+          <span>🍫 Rich Chocolate & Cocoa</span>
         </button>
       `;
     } else {
-      titleEl.textContent = 'What style hits the spot?';
-      if (hintEl) hintEl.textContent = 'Finger food, hearty rice meal, or crispy pastry?';
+      const foodCat = QUIZ_STATE.answers.tempOrCategory;
 
-      optionsContainer.innerHTML = `
-        <button class="craving-btn" onclick="handleQuizAnswer(3, 'bites')">
-          <span>Finger Food & Bites</span>
-        </button>
-        <button class="craving-btn" onclick="handleQuizAnswer(3, 'meal')">
-          <span>Full Meal (Silog / Pasta)</span>
-        </button>
-        <button class="craving-btn" onclick="handleQuizAnswer(3, 'crispy')">
-          <span>Crispy Croffle / Pastry</span>
-        </button>
-      `;
+      if (foodCat === 'snack') {
+        titleEl.textContent = 'How would you like your finger bites served?';
+        if (hintEl) hintEl.textContent = 'Crispy dip style, fully loaded with toppings, or cheesy & melted?';
+
+        optionsContainer.innerHTML = `
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'crispy')">
+            <span>🍟 Golden Crispy & Crunchy</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'loaded')">
+            <span>🥩 Loaded with Toppings</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'cheesy')">
+            <span>🧀 Cheesy & Dippable</span>
+          </button>
+        `;
+      } else if (foodCat === 'waffle') {
+        titleEl.textContent = 'How do you like your waffle or pastry?';
+        if (hintEl) hintEl.textContent = 'Fresh and crispy, warm and soft, or loaded with toppings?';
+
+        optionsContainer.innerHTML = `
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'crispy')">
+            <span>🧇 Golden & Extra Crispy</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'soft')">
+            <span>🥞 Warm, Fluffy & Soft</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'loaded')">
+            <span>🍫 Drizzled & Loaded</span>
+          </button>
+        `;
+      } else if (foodCat === 'sandwich') {
+        titleEl.textContent = 'What sandwich style sounds best?';
+        if (hintEl) hintEl.textContent = 'Toasted and crispy, double filling, or a quick light grab?';
+
+        optionsContainer.innerHTML = `
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'crispy')">
+            <span>🥪 Warm Toasted & Crispy</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'hearty')">
+            <span>🥩 Hearty & Double Filling</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'light')">
+            <span>🥪 Light & Fresh</span>
+          </button>
+        `;
+      } else if (foodCat === 'meal') {
+        titleEl.textContent = 'What type of meal are you hungry for?';
+        if (hintEl) hintEl.textContent = 'Filling rice plate or comforting pasta?';
+
+        optionsContainer.innerHTML = `
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'rice')">
+            <span>🍛 Classic Silog Rice Plate</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'pasta')">
+            <span>🍝 Savory Pasta Dish</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'hearty')">
+            <span>🥩 Hearty Chef Special</span>
+          </button>
+        `;
+      } else {
+        titleEl.textContent = 'What portion or style fits best?';
+        if (hintEl) hintEl.textContent = 'Light snacking, full meal, or crispy crunch?';
+
+        optionsContainer.innerHTML = `
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'bites')">
+            <span>🍟 Quick Bite / Finger Food</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'meal')">
+            <span>🍛 Full Filling Meal</span>
+          </button>
+          <button class="craving-btn" onclick="handleQuizAnswer(4, 'crispy')">
+            <span>🧇 Crispy Crunch</span>
+          </button>
+        `;
+      }
     }
   }
 }
@@ -3350,17 +3552,219 @@ function handleQuizAnswer(step, choice) {
     QUIZ_STATE.step = 2;
     renderQuizStep();
   } else if (step === 2) {
+    QUIZ_STATE.answers.tempOrCategory = choice;
     QUIZ_STATE.answers.tempOrFlavor = choice;
     QUIZ_STATE.step = 3;
     renderQuizStep();
   } else if (step === 3) {
+    QUIZ_STATE.answers.baseOrFlavor = choice;
+    if (QUIZ_STATE.answers.type === 'snack') {
+      QUIZ_STATE.answers.tempOrFlavor = choice;
+    }
+    QUIZ_STATE.step = 4;
+    renderQuizStep();
+  } else if (step === 4) {
     QUIZ_STATE.answers.tasteOrStyle = choice;
     generateQuizRecommendations();
   }
 }
 
+function calculateQuizMatchScore(item, answers) {
+  if (!item) return -999;
+
+  const type = answers.type;
+  // Normalize parameters from either 3-step or 4-step quiz
+  const tempPref = answers.temp || (type === 'drink' ? (answers.tempOrCategory || answers.tempOrFlavor) : null);
+  const drinkBasePref = answers.drinkBase || (type === 'drink' ? (answers.baseOrFlavor && answers.baseOrFlavor !== 'cold' && answers.baseOrFlavor !== 'hot' ? answers.baseOrFlavor : null) : null);
+
+  const foodCategoryPref = answers.foodCategory || (type === 'snack' ? (['waffle', 'sandwich', 'snack', 'fries', 'meal', 'any'].includes(answers.tempOrCategory) ? answers.tempOrCategory : null) : null);
+  const snackFlavorPref = answers.snackFlavor || (type === 'snack' ? (['sweet', 'savory', 'meaty'].includes(answers.baseOrFlavor) ? answers.baseOrFlavor : answers.tempOrFlavor) : null);
+
+  const tasteOrStyle = answers.tasteOrStyle || answers.flavor || answers.style;
+
+  const catId = Number(item.categoryId);
+  const isDrink = catId <= 9 && catId !== 3;
+  const isFood = catId >= 10 && catId !== 14;
+
+  const recInfo = (item.recommendationInfo || '').toLowerCase();
+  const name = (item.productName || item.name || '').toLowerCase();
+  const desc = (item.description || item.desc || '').toLowerCase();
+  const recipeStr = (item.recipe || '').toLowerCase();
+  const ingredients = (item.ingredients || []).map(i => (typeof i === 'string' ? i : (i.ingredientName || '')).toLowerCase());
+  const allText = [name, desc, recInfo, recipeStr, ...ingredients].join(' ');
+
+  // 1. Strict primary category type enforcement (Drink preference never yields Food, Food never yields Drink)
+  // Basis: Database recommendationInfo metadata and categoryId
+  const recInfoSaysFood = /waffle product|sandwich product|fries or potato snack|nacho snack|rice meal/i.test(recInfo);
+  const recInfoSaysDrink = /coffee-based|blended drink|fruit tea drink|carbonated drink|matcha-based|milk tea/i.test(recInfo);
+
+  if (type === 'drink' && (!isDrink || recInfoSaysFood)) return -999;
+  if (type === 'snack' && (!isFood || recInfoSaysDrink)) return -999;
+
+  let score = 0;
+
+  if (type === 'drink') {
+    const isExplicitHot = /^hot\b/i.test(name);
+    const isExplicitIced = /^iced\b/i.test(name);
+    const isFrappe = catId === 5 || recInfo.includes('blended drink');
+    const isSoda = catId === 7 || recInfo.includes('carbonated drink');
+    const isFruitTea = catId === 6 || recInfo.includes('fruit tea drink');
+    const isMilkTea = catId === 9 || recInfo.includes('milk tea drink');
+    const isMilky = catId === 4;
+
+    const onlyCold = isExplicitIced || isFrappe || isSoda || isFruitTea || isMilkTea || isMilky;
+    const onlyHot = isExplicitHot;
+
+    // Temperature matching: recommendationInfo instructs: "Check the recipe for hot or iced preparation"
+    if (tempPref === 'hot') {
+      if (onlyCold) return -999; // Exclude drinks that are strictly cold
+      if (recInfo.includes('hot or iced preparation') && isExplicitHot) score += 35;
+      else if (isExplicitHot) score += 30;
+      else score += 10;
+    } else if (tempPref === 'cold') {
+      if (onlyHot) return -999; // Exclude drinks that are strictly hot
+      if (recInfo.includes('blended drink') || recInfo.includes('carbonated drink') || recInfo.includes('fruit tea drink')) score += 35;
+      else if (isExplicitIced || onlyCold) score += 30;
+      else score += 10;
+    }
+
+    // Drink Base matching: uses recommendationInfo as direct basis
+    if (drinkBasePref && drinkBasePref !== 'any') {
+      if (drinkBasePref === 'coffee' || drinkBasePref === 'milk_coffee') {
+        if (recInfo.includes('coffee-based milk drink') && drinkBasePref === 'milk_coffee') score += 50;
+        else if (recInfo.includes('coffee-based')) score += 45;
+        else if (catId === 1 || catId === 2 || /coffee|espresso/i.test(allText)) score += 30;
+        if (recInfo.includes('fruit tea') || recInfo.includes('carbonated') || isFruitTea || isSoda) score -= 35;
+      } else if (drinkBasePref === 'blended') {
+        if (recInfo.includes('blended drink')) score += 50;
+        else if (isFrappe) score += 40;
+        else score -= 30;
+      } else if (drinkBasePref === 'tea') {
+        if (recInfo.includes('fruit tea drink') || recInfo.includes('milk tea drink')) score += 50;
+        else if (isFruitTea || isMilkTea) score += 40;
+        else if (recInfo.includes('coffee-based')) score -= 35;
+      } else if (drinkBasePref === 'matcha_choco') {
+        if (recInfo.includes('matcha-based drink') || recInfo.includes('chocolate-flavored')) score += 50;
+        else if (/matcha|choco|mocha|cocoa/i.test(allText)) score += 30;
+        else score -= 25;
+      } else if (drinkBasePref === 'soda') {
+        if (recInfo.includes('carbonated drink')) score += 50;
+        else if (isSoda) score += 40;
+        else score -= 35;
+      }
+    }
+
+    // Flavor profile matching: guided by recommendationInfo instructions
+    if (tasteOrStyle === 'sweet') {
+      if (recInfo.includes('coffee-based milk drink') || recInfo.includes('chocolate-flavored') || recInfo.includes('blended drink') || recInfo.includes('milk tea drink')) {
+        score += 25;
+      }
+      if (/caramel|vanilla|mocha|choco|berry|strawberry|taro|hazelnut|oreo|cookies|sugar|condensed|sweet/i.test(allText)) {
+        score += 25;
+      }
+      if (isFrappe || isMilkTea || isMilky) score += 15;
+      if (/americano/i.test(name) && !/honey/i.test(name)) score -= 20; // Unsweetened black coffee penalized
+    } else if (tasteOrStyle === 'bold') {
+      const hasEspresso = recInfo.includes('coffee-based') || catId === 1 || catId === 2 || /espresso|coffee|beans/i.test(allText);
+      if (recInfo.includes('coffee-based')) score += 35;
+      else if (hasEspresso) score += 30;
+      if (/americano|espresso|cappuccino/i.test(name)) score += 20;
+      if (recInfo.includes('fruit tea') || recInfo.includes('carbonated') || isFruitTea || isSoda) score -= 30;
+    } else if (tasteOrStyle === 'fruity') {
+      if (recInfo.includes('fruit tea drink') || recInfo.includes('carbonated drink')) {
+        score += 45;
+      } else if (isFruitTea || isSoda || /fruit|strawberry|blueberry|kiwi|passion|lemon|lychee/i.test(allText)) {
+        score += 35;
+      }
+      if (isFruitTea) score += 15;
+      if (recInfo.includes('coffee-based') || catId === 1 || catId === 2) score -= 30;
+    } else if (tasteOrStyle === 'chocolate') {
+      if (recInfo.includes('chocolate-flavored')) score += 50;
+      else if (/chocolate|choco|mocha|cocoa/i.test(allText)) score += 30;
+    }
+  } else if (type === 'snack') {
+    // Food category matching: uses recommendationInfo as direct basis
+    if (foodCategoryPref && foodCategoryPref !== 'any') {
+      if (foodCategoryPref === 'waffle') {
+        if (recInfo.includes('waffle product')) score += 50;
+        else if (catId === 10) score += 40;
+        else score -= 35;
+      } else if (foodCategoryPref === 'sandwich') {
+        if (recInfo.includes('sandwich product')) score += 50;
+        else if (catId === 11) score += 40;
+        else score -= 30;
+      } else if (foodCategoryPref === 'snack' || foodCategoryPref === 'fries') {
+        if (recInfo.includes('fries or potato snack') || recInfo.includes('nacho snack')) score += 50;
+        else if (catId === 12) score += 40;
+        else score -= 25;
+      } else if (foodCategoryPref === 'meal') {
+        if (recInfo.includes('rice meal')) score += 50;
+        else if (catId === 13 || catId === 15) score += 40;
+        else score -= 35;
+      }
+    }
+
+    // Flavor crave: sweet / savory / meaty (guided by recommendationInfo)
+    if (snackFlavorPref === 'sweet') {
+      if (recInfo.includes('waffle product')) score += 35;
+      else if (catId === 10) score += 30;
+      if (/sweet|waffle|pastry|choco|almond|oreo|smores|biscoff/i.test(allText)) score += 20;
+      if (recInfo.includes('rice meal') || catId === 13 || catId === 15) score -= 25;
+    } else if (snackFlavorPref === 'savory') {
+      if (recInfo.includes('fries or potato snack') || recInfo.includes('nacho snack') || recInfo.includes('sandwich product')) score += 25;
+      else if (catId === 12 || catId === 11 || catId === 15) score += 20;
+      if (/cheese|nacho|fries|popper|bite|stick/i.test(allText)) score += 20;
+      if (recInfo.includes('waffle product') || catId === 10) score -= 20;
+    } else if (snackFlavorPref === 'meaty') {
+      if (recInfo.includes('rice meal')) score += 35;
+      else if (recInfo.includes('sandwich product') || catId === 13) score += 30;
+      else if (catId === 11 || catId === 15) score += 15;
+      if (/liempo|chicken|sausage|spam|tapa|tocino|porkchop|beef|tuna|ham/i.test(allText)) score += 20;
+      if (recInfo.includes('waffle product') || catId === 10) score -= 35;
+    }
+
+    // Style preference: bites / meal / crispy / loaded / cheesy / soft / hearty / light / rice / pasta
+    if (tasteOrStyle === 'bites') {
+      if (recInfo.includes('fries or potato snack') || recInfo.includes('nacho snack') || catId === 12) score += 30;
+      if (catId === 11) score += 15;
+      if (recInfo.includes('rice meal') || catId === 13) score -= 25;
+    } else if (tasteOrStyle === 'meal') {
+      if (recInfo.includes('rice meal')) score += 40;
+      else if (catId === 13) score += 35;
+      if (catId === 15) score += 30;
+      if (catId === 12) score -= 25;
+    } else if (tasteOrStyle === 'crispy') {
+      if (recInfo.includes('waffle product') || recInfo.includes('fries or potato snack')) score += 30;
+      else if (catId === 10) score += 25;
+      if (/fries|crispy|popper|stick/i.test(allText)) score += 25;
+      if (catId === 15) score -= 20;
+    } else if (tasteOrStyle === 'loaded') {
+      if (/nacho|beef|toppings|loaded|smores|oreo|overload|special/i.test(allText)) score += 35;
+      if (recInfo.includes('nacho snack') || catId === 12 || catId === 10) score += 20;
+    } else if (tasteOrStyle === 'cheesy') {
+      if (/cheese|cheesy|nacho|stick|sauce/i.test(allText)) score += 35;
+      if (catId === 12) score += 20;
+    } else if (tasteOrStyle === 'soft') {
+      if (catId === 10 || /pancake|fluffy|soft|classic/i.test(allText)) score += 30;
+    } else if (tasteOrStyle === 'hearty') {
+      if (/silog|liempo|porkchop|chicken|beef|tapa|sausage|double/i.test(allText)) score += 30;
+      if (catId === 13 || catId === 11) score += 20;
+    } else if (tasteOrStyle === 'light') {
+      if (catId === 11 || /fresh|egg|tuna|salad|light/i.test(allText)) score += 30;
+    } else if (tasteOrStyle === 'rice') {
+      if (recInfo.includes('rice meal') || catId === 13 || /silog|rice/i.test(allText)) score += 40;
+      if (catId === 15) score -= 20;
+    } else if (tasteOrStyle === 'pasta') {
+      if (catId === 15 || /spaghetti|carbonara|pasta/i.test(allText)) score += 45;
+      if (catId === 13) score -= 20;
+    }
+  }
+
+  return score;
+}
+
 function generateQuizRecommendations() {
-  const { type, tempOrFlavor, tasteOrStyle } = QUIZ_STATE;
+  const { type, tempOrFlavor, tasteOrStyle } = (QUIZ_STATE && QUIZ_STATE.answers) ? QUIZ_STATE.answers : {};
   const resultsSection = document.getElementById('cravingResultsSection');
   const container = document.getElementById('recommendationContainer');
   const badgeEl = document.getElementById('quizStepBadge');
@@ -3373,87 +3777,94 @@ function generateQuizRecommendations() {
   if (hintEl) hintEl.textContent = 'Handpicked by your virtual barista just for you.';
   if (optionsContainer) optionsContainer.innerHTML = '';
 
-  let matches = [];
+  // Diagnostic logging helper for non-production / development analysis
+  const isDev = window.location.hostname === 'localhost' ||
+                window.location.hostname === '127.0.0.1' ||
+                window.location.search.includes('debug=true') ||
+                window.location.protocol === 'file:';
 
-  if (type === 'drink') {
-    const isCold = tempOrFlavor === 'cold';
+  // 1. Only consider eligible, active products: enabled, not deleted, and in-stock
+  const eligibleProducts = (ALL_ITEMS || []).filter(item => {
+    if (!item) return false;
+    if (item.isdeleted === 1 || item.isdeleted === true || item.isDeleted === 1) return false;
+    if (item.isOutOfStock) return false;
+    const catId = Number(item.categoryId);
+    // Exclude Add-ons categories
+    if (catId === 3 || catId === 14) return false;
+    return true;
+  });
 
-    if (tasteOrStyle === 'sweet') {
-      matches = ALL_ITEMS.filter(item => {
-        const name = (item.productName || item.name || '').toLowerCase();
-        const cat = item.cat || '';
-        const isSweet = cat === 'frappe' || cat === 'milktea' || cat === 'noncoffee' || /caramel|vanilla|mocha|milky|chocolate|taro|hazelnut/i.test(name);
-        const matchTemp = isCold ? (name.includes('iced') || cat === 'frappe' || cat === 'milktea' || !name.includes('hot')) : (name.includes('hot') || !name.includes('iced'));
-        return isSweet && matchTemp;
-      });
-    } else if (tasteOrStyle === 'bold') {
-      matches = ALL_ITEMS.filter(item => {
-        const name = (item.productName || item.name || '').toLowerCase();
-        const cat = item.cat || '';
-        const isBold = cat === 'espresso' || /americano|espresso|cappuccino|spanish/i.test(name);
-        const matchTemp = isCold ? (name.includes('iced') || !name.includes('hot')) : (name.includes('hot') || !name.includes('iced'));
-        return isBold && matchTemp;
-      });
-    } else if (tasteOrStyle === 'fruity') {
-      matches = ALL_ITEMS.filter(item => {
-        const name = (item.productName || item.name || '').toLowerCase();
-        const cat = item.cat || '';
-        return cat === 'fruittea' || cat === 'soda' || /fruit|passion|berry|strawberry|lemon|lychee|peach|soda|fizz/i.test(name);
-      });
-    }
-  } else {
-    // Snack filtering
-    if (tempOrFlavor === 'sweet' || tasteOrStyle === 'crispy') {
-      matches = ALL_ITEMS.filter(item => {
-        const name = (item.productName || item.name || '').toLowerCase();
-        const cat = item.cat || '';
-        return cat === 'croffle' || /croffle|waffle|pastry|pancake|sweet/i.test(name);
-      });
-    } else if (tempOrFlavor === 'savory' || tasteOrStyle === 'bites') {
-      matches = ALL_ITEMS.filter(item => {
-        const name = (item.productName || item.name || '').toLowerCase();
-        const cat = item.cat || '';
-        return cat === 'snacks' || /fries|nacho|cheese stick|bite|finger/i.test(name);
-      });
-    } else {
-      // Meaty / full meal
-      matches = ALL_ITEMS.filter(item => {
-        const name = (item.productName || item.name || '').toLowerCase();
-        const cat = item.cat || '';
-        return cat === 'silog' || cat === 'pasta' || cat === 'sandwiches' || /silog|tapa|tocino|porkchop|spam|burger|sandwich|pasta|spaghetti|carbonara/i.test(name);
-      });
-    }
-  }
+  // 2. Score and rank items using multi-factor preferences
+  const scoredItems = eligibleProducts
+    .map(item => ({
+      item,
+      score: calculateQuizMatchScore(item, QUIZ_STATE.answers)
+    }))
+    .filter(entry => entry.score > 0);
 
-  // Filter out any out-of-stock items so customer is only recommended available products
-  matches = matches.filter(item => !item.isOutOfStock);
+  scoredItems.sort((a, b) => b.score - a.score || (a.item.productId || 0) - (b.item.productId || 0));
 
-  // Fallback to general in-stock pool if fewer than 3 items matched
+  let matches = scoredItems.map(entry => entry.item);
+
+  // 3. Fallback to general in-stock pool of matching category type if fewer than 3 matches
   if (matches.length < 3) {
-    const fallbackPool = ALL_ITEMS.filter(item => {
-      if (item.isOutOfStock) return false;
-      const isDrink = ['espresso','noncoffee','milktea','frappe','fruittea','soda'].includes(item.cat);
+    const fallbackPool = eligibleProducts.filter(item => {
+      const catId = Number(item.categoryId);
+      const isDrink = catId <= 9 && catId !== 3;
       return type === 'drink' ? isDrink : !isDrink;
     });
-    matches = [...matches, ...fallbackPool].filter((v, i, a) => a.findIndex(t => (t.productId || t.uid) === (v.productId || v.uid)) === i);
+    matches = [...matches, ...fallbackPool];
   }
 
-  const selectedRecs = matches.slice(0, 6);
+  // 4. Ensure distinct parent products only (no duplicate products)
+  const seenIds = new Set();
+  const distinctMatches = [];
+  for (const item of matches) {
+    const id = item.productId || item.uid;
+    if (id && !seenIds.has(id)) {
+      seenIds.add(id);
+      distinctMatches.push(item);
+    }
+  }
+
+  const selectedRecs = distinctMatches.slice(0, 6);
+
+  if (isDev) {
+    console.group('🔍 [Quiz Recommendation Diagnostics]');
+    console.log('Customer selected answers:', QUIZ_STATE.answers);
+    console.log('Recommendation function actually called: calculateQuizMatchScore');
+    console.log('Eligible products loaded from Supabase:', eligibleProducts.length);
+    console.log('Whether recommendationInfo is present in products:', eligibleProducts.some(p => Boolean(p.recommendationInfo)));
+    console.log('Top three products & scores:', scoredItems.slice(0, 3).map(s => ({
+      productId: s.item.productId,
+      productName: s.item.productName,
+      score: s.score
+    })));
+    console.log('Product IDs actually rendered on kiosk result page:', selectedRecs.map(r => r.productId || r.uid));
+    console.groupEnd();
+  }
 
   if (container) {
     if (selectedRecs.length > 0) {
       container.innerHTML = selectedRecs.map(item => {
         const pName = item.productName || item.name;
-        const pPrice = (item.hasSizes && item.sizes && item.sizes.length > 0) ? `₱${item.minPrice}` : `₱${item.price || 0}`;
+        const hasItemSizes = (item.hasSizes || (item.sizes && item.sizes.length > 0)) && item.sizes && item.sizes.length > 0;
+        const pPrice = hasItemSizes ? `₱${item.minPrice}` : `₱${item.price || 0}`;
         const pId = item.productId || item.uid;
         const pImg = getProductImage(item);
+        const pDesc = getProductDescription(item);
+        const recBadge = (item.recommendationInfo && !item.recommendationInfo.startsWith('Use the product'))
+          ? item.recommendationInfo.split('.')[0]
+          : '';
 
         return `
           <div class="quiz-rec-card" onclick="selectQuizRecommendation(${pId})">
             <div class="quiz-rec-img-wrap">
               <img class="quiz-rec-img" src="${pImg}" alt="${pName}" onerror="this.onerror=null;this.src='placeholder.svg';" />
             </div>
+            ${recBadge ? `<span class="quiz-rec-badge" title="${recBadge}">${recBadge}</span>` : ''}
             <div class="quiz-rec-name">${pName}</div>
+            ${pDesc ? `<div class="quiz-rec-desc">${pDesc}</div>` : ''}
             <div class="quiz-rec-price">${pPrice}</div>
             <button class="quiz-rec-btn">Order This →</button>
           </div>
@@ -3482,10 +3893,14 @@ function selectQuizRecommendation(productId) {
   }
 }
 
-// Make accessible for inline onclick handlers
+// Make accessible for inline onclick handlers & automated testing
 window.handleQuizAnswer = handleQuizAnswer;
 window.selectQuizRecommendation = selectQuizRecommendation;
 window.CustomerSessionManager = CustomerSessionManager;
+window.calculateQuizMatchScore = calculateQuizMatchScore;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { calculateQuizMatchScore };
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // SESSION LIFECYCLE, RESCAN MODAL & INTERACTION LISTENERS
