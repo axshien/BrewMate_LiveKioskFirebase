@@ -40,24 +40,24 @@
     <div class="order-loading-progress-track">
       <div class="order-loading-progress-bar" id="orderLoadingProgressBar"></div>
     </div>
-    <div class="order-loading-status">Please wait while we confirm your ticket...</div>
+    <div class="order-loading-status">Please wait while we complete your order...</div>
   </div>
 </div>
 
-<!-- ══ SESSION EXPIRED OVERLAY ══ -->
+<!-- ══ SESSION RESET OVERLAY ══ -->
 <div id="sessionExpiredOverlay" class="session-expired-overlay hidden" aria-live="assertive" role="alertdialog">
   <div class="session-expired-card">
     <div class="session-expired-logo">
       <img src="chilltop.png" alt="Chilltop Logo" onerror="this.style.display='none'">
     </div>
-    <div class="session-expired-badge">⏱️ Inactivity Timeout</div>
-    <h1 class="session-expired-title">Session Expired</h1>
+    <div class="session-expired-badge">⏱️ Inactivity Notice</div>
+    <h1 class="session-expired-title">Order Reset</h1>
     <div class="session-expired-divider"></div>
     <p class="session-expired-msg">
-      Your session has expired due to inactivity. Please scan the ChillVentoryx QR code again to continue.
+      The kiosk has been reset due to inactivity. Tap below to start a new order.
     </p>
-    <button class="btn-rescan-info" id="btnRescanInfo" type="button">
-      📷 Scan Original QR Code Again
+    <button class="btn-start" id="btnResetHome" type="button" style="width: 100%; margin-top: 10px;">
+      🏠 Start New Order
     </button>
   </div>
 </div>
@@ -147,21 +147,10 @@
       </div>
     </div>
     <div id="featuredHeader" class="section-hd filterable-title" data-category="all" style="margin-top: 16px;">
-      <h3>Top Selling</h3><span class="badge">Best Seller</span>
+      <h3>Top Selling</h3><span class="badge">Best Sellers</span>
     </div>
-    <div class="featured-card filterable-item" id="featCard" data-category="all"
-         style="position: relative; flex-direction: column; align-items: stretch; gap: 0;">      
-      <div style="display: flex; align-items: center; gap: 16px;">
-        <div class="feat-img-wrap" id="featImgWrap">
-          <img id="featImg" class="feat-img" src="placeholder.svg" alt="Top Selling" onerror="this.onerror=null;this.src='placeholder.svg';" />
-        </div>
-        <div class="feat-info">
-          <div class="feat-name" id="featName">Loading top seller...</div>
-          <div class="feat-desc" id="featDesc"></div>
-          <div class="feat-price" id="featPrice"></div>
-        </div>
-        <button class="add-btn" id="featAddBtn">+</button>
-      </div>     
+    <div id="topSellingGrid" class="items-grid filterable-item" data-category="all" style="margin-bottom: clamp(20px, 3vw, 32px);">
+      <!-- Rendered dynamically by renderTopSellingProducts() -->
     </div>
 
     <div id="menuCategoriesSections"></div>

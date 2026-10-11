@@ -653,6 +653,29 @@
       z-index: 2;
       box-shadow: 0 2px 6px rgba(229, 57, 53, 0.4);
     }
+    /* Star badge on top right corner of best seller products */
+    .bestseller-star-badge {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: linear-gradient(135deg, #F59E0B, #D97706);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 7px;
+      border-radius: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      z-index: 3;
+      box-shadow: 0 2px 8px rgba(217, 119, 6, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      line-height: 1;
+    }
+    .bestseller-star-badge .star-icon {
+      font-size: 11px;
+      color: #FFFBEB;
+    }
     /* Promo badge on product card image */
     .promo-badge-card {
       position: absolute;
@@ -672,6 +695,10 @@
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
+    }
+    /* When both star and promo are present, adjust position */
+    .has-bestseller-star .promo-badge-card {
+      top: 30px;
     }
     /* Strikethrough original price */
     .price-original {
@@ -2140,6 +2167,10 @@
       gap: 6px;
       font-size: 11.5px;
       color: #4A465E;
+      background: rgba(137, 87, 204, 0.05);
+      padding: 4px 6px;
+      border-radius: 6px;
+      margin-bottom: 2px;
     }
     .ci-addon-bullet {
       color: var(--primary);
@@ -2151,11 +2182,71 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      font-weight: 600;
     }
     .ci-addon-price {
       font-weight: 700;
       color: var(--primary);
       flex-shrink: 0;
+      margin-right: 4px;
+    }
+    .ci-addon-ctrls {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: white;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: 12px;
+      padding: 1px 4px;
+      margin-left: 4px;
+    }
+    .ci-addon-btn {
+      background: none;
+      border: none;
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 11px;
+      cursor: pointer;
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      transition: background 0.15s ease;
+      line-height: 1;
+      padding: 0;
+    }
+    .ci-addon-btn:hover:not(:disabled) {
+      background: var(--primary-bg);
+    }
+    .ci-addon-btn:disabled {
+      color: #ccc;
+      cursor: not-allowed;
+    }
+    .ci-addon-qty {
+      font-size: 11px;
+      font-weight: 700;
+      min-width: 12px;
+      text-align: center;
+      color: var(--text);
+    }
+    .ci-addon-remove-btn {
+      background: none;
+      border: none;
+      color: #e74c3c;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 2px 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      margin-left: 2px;
+      transition: background 0.15s ease;
+    }
+    .ci-addon-remove-btn:hover {
+      background: rgba(231, 76, 60, 0.1);
     }
     .ci-line-total {
       display: flex;

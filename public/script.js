@@ -9,6 +9,8 @@ let ALL_ADDON_RECIPES = {};
 let ALL_PROMOTIONS = [];        // Active promotions from chill_promotion
 let PROMO_PRODUCT_IDS = {};    // Map: productId -> promotion object
 let TOP_SELLING_PRODUCT = null;
+let TOP_SELLING_PRODUCTS = []; // Top 5 selling unique products
+let CATEGORY_TOP3_PRODUCT_IDS = new Set(); // Product IDs that are in top 3 of their category
 let cart = [];
 
 // ═════════════════════════════════════════
@@ -69,79 +71,20 @@ const CustomerSessionManager = {
   },
 
   isExpiredTab() {
-    try {
-      return sessionStorage.getItem(this.EXPIRED_FLAG_KEY) === '1';
-    } catch (e) {
-      return false;
-    }
-  },
-
-  setExpiredTab() {
-    this.isExpired = true;
-    try {
-      sessionStorage.setItem(this.EXPIRED_FLAG_KEY, '1');
-    } catch (e) {}
-  },
-
-  isQrScanEntry() {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const hash = window.location.hash || '';
-      if (
-        params.has('entry') ||
-        params.has('scan') ||
-        params.has('qr') ||
-        params.has('kiosk') ||
-        hash.includes('entry=qr') ||
-        hash.includes('scan')
-      ) {
-        return true;
-      }
-
-      // Check navigation type: reload/back_forward vs fresh navigation
-      const navEntries = performance.getEntriesByType('navigation');
-      const navType = navEntries && navEntries.length > 0 ? navEntries[0].type : '';
-      if (navType === 'reload' || navType === 'back_forward') {
-        return false;
-      }
-
-      if (!this.isExpiredTab() && !this.getStoredToken()) {
-        return true;
-      }
-    } catch (e) {}
     return false;
   },
 
+  setExpiredTab() {
+    // No-op: tabs are never locked
+  },
+
+  isQrScanEntry() {
+    return true; // Always allow starting or restarting orders
+  },
+
   async callEdgeFunction(action, extraPayload = {}) {
-    const headers = {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_ANON_KEY,
-    };
-    if (this.token) {
-      headers['X-Kiosk-Session-Token'] = this.token;
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    const body = {
-      action,
-      token: this.token || undefined,
-      ...extraPayload,
-    };
-
-    try {
-      const res = await fetch(this.ENDPOINT, {
-        method: 'POST',
-        headers,
-        credentials: 'include', // Sends & receives HttpOnly SameSite cookie
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      return { status: res.status, ok: res.ok, data };
-    } catch (err) {
-      console.warn(`CustomerSessionManager ${action} request error:`, err);
-      return { status: 0, ok: false, data: { success: false, error: 'Network error' } };
-    }
+    // Direct passthrough
+    return { status: 404, ok: false, data: {} };
   },
 
   async init() {
@@ -153,99 +96,15 @@ const CustomerSessionManager = {
       applyKioskOpenState(false);
     }
 
-    // Check if this tab is already locked as expired
-    if (this.isExpiredTab() && !this.isQrScanEntry()) {
-      this.handleSessionExpired('Tab locked from prior expiration');
-      return;
-    }
-
-    const existingToken = this.getStoredToken();
-
-    if (existingToken) {
-      this.token = existingToken;
-      const valResult = await this.validateSession();
-      if (valResult && valResult.valid) {
-        // Valid, unexpired session preserved across refresh/reopen
-        this.startCountdownTimer();
-        return;
-      } else {
-        if (this.isQrScanEntry()) {
-          await this.createNewSession();
-        } else {
-          this.handleSessionExpired();
-        }
-        return;
-      }
-    }
-
-    if (this.isQrScanEntry() || !this.isExpiredTab()) {
-      await this.createNewSession();
-    } else {
-      this.handleSessionExpired();
-    }
+    this.initLocalGovernor();
   },
 
   async createNewSession() {
-    if (!IS_KIOSK_OPEN) {
-      applyKioskOpenState(false);
-      return false;
-    }
-
-    const res = await this.callEdgeFunction('create');
-    if (res.ok && res.data && res.data.success) {
-      this.setStoredToken(res.data.token);
-      this.sessionId = res.data.sessionId;
-      this.isExpired = false;
-      this.serverTimeOffset = res.data.serverTime
-        ? new Date(res.data.serverTime).getTime() - Date.now()
-        : 0;
-      this.expiresAt = new Date(res.data.expiresAt);
-      this.lastTouchTime = Date.now();
-
-      try {
-        if (window.history.replaceState && window.location.search) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-      } catch (e) {}
-
-      this.hideExpiredOverlay();
-      this.startCountdownTimer();
-      return true;
-    } else {
-      if (res.status === 403 || (res.data && res.data.code === 'KIOSK_CLOSED')) {
-        applyKioskOpenState(false);
-        return false;
-      }
-      if (res.status === 404) {
-        return this.initLocalGovernor();
-      }
-      console.warn('Session creation error:', res.data);
-      return false;
-    }
+    return this.initLocalGovernor();
   },
 
   async validateSession() {
-    if (!this.token) return { valid: false };
-
-    const res = await this.callEdgeFunction('validate');
-    if (res.ok && res.data && res.data.valid) {
-      this.sessionId = res.data.sessionId;
-      this.isExpired = false;
-      this.serverTimeOffset = res.data.serverTime
-        ? new Date(res.data.serverTime).getTime() - Date.now()
-        : 0;
-      this.expiresAt = new Date(res.data.expiresAt);
-      return { valid: true, expiresAt: this.expiresAt };
-    } else {
-      if (res.status === 403 || (res.data && res.data.code === 'KIOSK_CLOSED')) {
-        applyKioskOpenState(false);
-        return { valid: false, code: 'KIOSK_CLOSED' };
-      }
-      if (res.status === 404 && this.localGovernorActive) {
-        return this.validateLocalGovernor();
-      }
-      return { valid: false, code: res.data?.code || 'SESSION_EXPIRED' };
-    }
+    return this.validateLocalGovernor();
   },
 
   async recordActivity(actionName = 'interaction', forceImmediate = false) {
@@ -314,15 +173,9 @@ const CustomerSessionManager = {
   },
 
   handleSessionExpired(reason = '') {
-    if (this.isExpired) {
-      this.showExpiredOverlay();
-      return;
-    }
-    this.isExpired = true;
-    if (this.timerInterval) clearInterval(this.timerInterval);
-
-    this.clearStoredToken();
-    this.setExpiredTab();
+    this.isExpired = false;
+    this.lastTouchTime = Date.now();
+    this.expiresAt = new Date(Date.now() + this.TIMEOUT_SECONDS * 1000);
 
     // Clear cart and customer inputs
     cart = [];
@@ -334,36 +187,24 @@ const CustomerSessionManager = {
     const notesInput = document.getElementById('orderNotes');
     if (notesInput) notesInput.value = '';
 
-    // Close open product / quiz overlays
+    // Close open product / quiz / overlays
     const prodModal = document.getElementById('confirmation-overlay');
     if (prodModal) prodModal.classList.add('hidden');
     const quizModal = document.getElementById('quiz-modal-overlay');
     if (quizModal) quizModal.classList.add('hidden');
     if (typeof closeQuiz === 'function') closeQuiz();
+    const expOverlay = document.getElementById('sessionExpiredOverlay');
+    if (expOverlay) expOverlay.classList.add('hidden');
 
-    this.showExpiredOverlay();
-
-    try {
-      window.history.pushState(null, '', window.location.href);
-      window.onpopstate = () => {
-        if (CustomerSessionManager.isExpired) {
-          window.history.pushState(null, '', window.location.href);
-          CustomerSessionManager.showExpiredOverlay();
-        }
-      };
-    } catch (e) {}
-
-    this.callEdgeFunction('invalidate');
+    // Reset to welcomeScreen (homepage) directly
+    if (typeof goTo === 'function') {
+      goTo('welcomeScreen');
+    }
   },
 
   showExpiredOverlay() {
-    const overlay = document.getElementById('sessionExpiredOverlay');
-    if (overlay) overlay.classList.remove('hidden');
-
-    const placeBtn = document.getElementById('placeOrderBtn');
-    if (placeBtn) placeBtn.disabled = true;
-    const startBtn = document.getElementById('startBtn');
-    if (startBtn) startBtn.disabled = true;
+    // When inactive, simply reset to homepage
+    this.handleSessionExpired('Reset to homepage');
   },
 
   hideExpiredOverlay() {
@@ -374,40 +215,13 @@ const CustomerSessionManager = {
   },
 
   async submitOrder(kioskPayload) {
-    if (this.isExpired) {
-      this.handleSessionExpired('Order submission blocked by expired session');
-      return { success: false, code: 'SESSION_EXPIRED', message: 'Session expired due to inactivity.' };
-    }
-
     if (!IS_KIOSK_OPEN) {
       applyKioskOpenState(false);
       return { success: false, code: 'KIOSK_CLOSED', message: 'Kiosk is currently closed.' };
     }
 
-    const res = await this.callEdgeFunction('submit-order', { orderPayload: kioskPayload });
-    if (res.ok && res.data && res.data.success) {
-      return { success: true, order: res.data.order, orderNumber: res.data.orderNumber };
-    }
-
-    if (res.status === 401 || (res.data && res.data.code === 'SESSION_EXPIRED')) {
-      this.handleSessionExpired('Session expired on server');
-      return { success: false, code: 'SESSION_EXPIRED', message: res.data.message };
-    }
-
-    if (res.status === 403 || (res.data && res.data.code === 'KIOSK_CLOSED')) {
-      applyKioskOpenState(false);
-      return { success: false, code: 'KIOSK_CLOSED', message: 'Kiosk is closed.' };
-    }
-
-    if (res.status === 404) {
-      return this.submitOrderDirectFallback(kioskPayload);
-    }
-
-    return {
-      success: false,
-      code: res.data?.code || 'ORDER_ERROR',
-      message: res.data?.message || 'Failed to place order.',
-    };
+    // Directly and reliably insert into chill_kiosk_queue
+    return this.submitOrderDirectFallback(kioskPayload);
   },
 
   async submitOrderDirectFallback(kioskPayload) {
@@ -916,14 +730,8 @@ async function refreshInventoryStock() {
       updateCardStockUI(item);
     });
 
-    // Update Top Selling product card
-    if (TOP_SELLING_PRODUCT) {
-      const updatedTop = ALL_ITEMS.find(i => i.productId === TOP_SELLING_PRODUCT.productId);
-      if (updatedTop) {
-        TOP_SELLING_PRODUCT = updatedTop;
-        renderTopSellingCard(TOP_SELLING_PRODUCT);
-      }
-    }
+    // Update Top Selling products cards
+    renderTopSellingProducts();
 
     // Update product modal if open
     if (itemPendingConfirmation) {
@@ -1356,121 +1164,155 @@ async function loadMenuFromSupabase() {
   }
 }
 
-// Determine top-selling product dynamically from sales data
+// Helper to normalize product name by removing size designations (12oz, 16oz, 22oz, solo, group, etc.)
+function getNormalizedBaseProductName(name) {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/\b(12\s*oz|16\s*oz|16\s*0z|22\s*oz|solo|group|regular|large|medium|small)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Determine top-selling products and top 3 per category dynamically from sales data
 async function loadTopSellingProduct() {
   if (!db || !ALL_ITEMS.length) return;
+  CATEGORY_TOP3_PRODUCT_IDS.clear();
+
   try {
-    const { data: orderItems } = await db
+    const { data: orderItems, error: oiErr } = await db
       .from('chill_order_item')
       .select('productId, productName, quantity');
 
+    if (oiErr) {
+      console.warn("Could not load chill_order_item:", oiErr);
+    }
+
+    // Step 1: Map each active item in ALL_ITEMS by its clean base name (size ignored)
+    const activeProducts = ALL_ITEMS.filter(p => !p.isOutOfStock || true); // keep all enabled products
+    const uniqueBaseMap = new Map(); // baseKey -> { primaryProduct, items: [], totalSold: 0 }
+
+    activeProducts.forEach(item => {
+      const baseKey = getNormalizedBaseProductName(item.productName);
+      if (!uniqueBaseMap.has(baseKey)) {
+        uniqueBaseMap.set(baseKey, {
+          primaryProduct: item,
+          items: [item],
+          totalSold: 0
+        });
+      } else {
+        const group = uniqueBaseMap.get(baseKey);
+        group.items.push(item);
+        // Prefer an in-stock item as the primary display product
+        if (group.primaryProduct.isOutOfStock && !item.isOutOfStock) {
+          group.primaryProduct = item;
+        }
+      }
+    });
+
     if (orderItems && orderItems.length > 0) {
-      const activeNames = ALL_ITEMS.map(p => ({
-        product: p,
-        cleanName: p.productName.toLowerCase().trim()
-      }));
-
-      const salesMap = new Map();
-      ALL_ITEMS.forEach(p => salesMap.set(p.productId, { product: p, score: 0 }));
-
       orderItems.forEach(oi => {
-        if (salesMap.has(oi.productId)) {
-          salesMap.get(oi.productId).score += (oi.quantity || 1);
+        const qty = Number(oi.quantity) || 1;
+        const oBase = getNormalizedBaseProductName(oi.productName);
+
+        // First attempt direct baseKey match
+        if (uniqueBaseMap.has(oBase)) {
+          uniqueBaseMap.get(oBase).totalSold += qty;
           return;
         }
-        const oName = (oi.productName || '').toLowerCase().replace(/12oz|16oz|160z|22oz|solo|group/gi, '').trim();
-        for (const an of activeNames) {
-          if (an.cleanName === oName || oName.includes(an.cleanName) || an.cleanName.includes(oName)) {
-            salesMap.get(an.product.productId).score += (oi.quantity || 1);
+
+        // Second attempt matching by oi.productId to our products
+        const matchedItem = ALL_ITEMS.find(p => p.productId === oi.productId);
+        if (matchedItem) {
+          const itemBase = getNormalizedBaseProductName(matchedItem.productName);
+          if (uniqueBaseMap.has(itemBase)) {
+            uniqueBaseMap.get(itemBase).totalSold += qty;
+            return;
+          }
+        }
+
+        // Third attempt substring/fuzzy matching
+        for (const [baseKey, group] of uniqueBaseMap.entries()) {
+          if (oBase && (baseKey.includes(oBase) || oBase.includes(baseKey))) {
+            group.totalSold += qty;
             break;
           }
         }
       });
-
-      const sorted = Array.from(salesMap.values()).sort((a,b) => b.score - a.score);
-      // Prefer top seller that is currently in stock
-      const inStockTop = sorted.find(s => s.product && !s.product.isOutOfStock);
-      if (inStockTop) {
-        TOP_SELLING_PRODUCT = inStockTop.product;
-      } else if (sorted.length > 0 && sorted[0].score > 0) {
-        TOP_SELLING_PRODUCT = sorted[0].product;
-      }
     }
+
+    // Step 2: Rank the distinct base products globally to pick the top 5
+    const distinctGroups = Array.from(uniqueBaseMap.values());
+    distinctGroups.sort((a, b) => {
+      if (b.totalSold !== a.totalSold) {
+        return b.totalSold - a.totalSold;
+      }
+      // Prefer in stock if equal
+      if (a.primaryProduct.isOutOfStock !== b.primaryProduct.isOutOfStock) {
+        return a.primaryProduct.isOutOfStock ? 1 : -1;
+      }
+      return 0;
+    });
+
+    // Pick top 5 distinct products
+    TOP_SELLING_PRODUCTS = distinctGroups.slice(0, 5).map(g => g.primaryProduct);
+    TOP_SELLING_PRODUCT = TOP_SELLING_PRODUCTS[0] || ALL_ITEMS[0] || null;
+
+    // Step 3: Compute Top 3 Best Sellers for each category
+    // Group distinct products by categoryId
+    const catGroupsMap = new Map();
+    distinctGroups.forEach(g => {
+      const cId = Number(g.primaryProduct.categoryId);
+      if (!catGroupsMap.has(cId)) {
+        catGroupsMap.set(cId, []);
+      }
+      catGroupsMap.get(cId).push(g);
+    });
+
+    catGroupsMap.forEach((groupsInCat) => {
+      groupsInCat.sort((a, b) => b.totalSold - a.totalSold);
+      // Top 3 in this category
+      const top3 = groupsInCat.slice(0, 3);
+      top3.forEach(g => {
+        // Tag all items in this group (all size variants) as top 3 in category
+        g.items.forEach(it => {
+          CATEGORY_TOP3_PRODUCT_IDS.add(it.productId);
+        });
+      });
+    });
+
   } catch (e) {
-    console.warn("Could not determine top selling product from orders:", e);
+    console.warn("Could not determine top selling products from orders:", e);
+    // Fallback: Pick top 5 enabled items
+    TOP_SELLING_PRODUCTS = ALL_ITEMS.filter(i => !i.isOutOfStock).slice(0, 5);
+    if (!TOP_SELLING_PRODUCTS.length) TOP_SELLING_PRODUCTS = ALL_ITEMS.slice(0, 5);
+    TOP_SELLING_PRODUCT = TOP_SELLING_PRODUCTS[0] || null;
   }
 
-  if (!TOP_SELLING_PRODUCT) {
-    TOP_SELLING_PRODUCT = ALL_ITEMS.find(i => !i.isOutOfStock) || ALL_ITEMS[0];
-  }
-
-  renderTopSellingCard(TOP_SELLING_PRODUCT);
+  renderTopSellingProducts();
 }
 
-function renderTopSellingCard(product) {
-  if (!product) return;
-  const featImg = document.getElementById('featImg');
-  const featName = document.getElementById('featName');
-  const featDesc = document.getElementById('featDesc');
-  const featPrice = document.getElementById('featPrice');
-  const featCard = document.getElementById('featCard');
-  const featAddBtn = document.getElementById('featAddBtn');
+function renderTopSellingProducts() {
+  const container = document.getElementById('topSellingGrid');
+  const header = document.getElementById('featuredHeader');
+  if (!container) return;
 
-  if (featImg) {
-    featImg.src = getProductImage(product);
-    featImg.onerror = () => { featImg.src = 'placeholder.svg'; };
-  }
-  if (featName) featName.textContent = product.productName;
-  if (featDesc) {
-    const cleanDesc = getProductDescription(product);
-    featDesc.textContent = cleanDesc;
-    featDesc.style.display = cleanDesc ? 'block' : 'none';
-  }
-  const hasItemSizes = (product.hasSizes || (product.sizes && product.sizes.length > 0)) && product.sizes && product.sizes.length > 0;
-  if (featPrice) {
-    if (hasItemSizes) {
-      featPrice.textContent = (product.minPrice !== product.maxPrice) 
-        ? `₱${product.minPrice} - ₱${product.maxPrice}` 
-        : `₱${product.minPrice}`;
-    } else {
-      featPrice.textContent = `₱${product.price || 0}`;
-    }
+  container.innerHTML = '';
+
+  if (!TOP_SELLING_PRODUCTS || TOP_SELLING_PRODUCTS.length === 0) {
+    if (header) header.style.display = 'none';
+    container.style.display = 'none';
+    return;
   }
 
-  const isOOS = !!product.isOutOfStock;
-  if (featCard) {
-    featCard.classList.toggle('out-of-stock', isOOS);
-    featCard.style.pointerEvents = isOOS ? 'none' : '';
-    if (isOOS) {
-      featCard.setAttribute('aria-disabled', 'true');
-    } else {
-      featCard.removeAttribute('aria-disabled');
-    }
-    const existingBadge = featCard.querySelector('.stock-badge-oos');
-    if (existingBadge) existingBadge.remove();
-    if (isOOS) {
-      const b = document.createElement('span');
-      b.className = 'stock-badge-oos';
-      b.textContent = 'Out of Stock';
-      featCard.querySelector('.feat-img-wrap')?.appendChild(b);
-    }
-  }
+  if (header) header.style.display = '';
+  container.style.display = 'grid';
 
-  if (featAddBtn) {
-    featAddBtn.disabled = isOOS;
-    featAddBtn.classList.toggle('disabled', isOOS);
-    featAddBtn.classList.toggle('oos-btn', isOOS);
-    featAddBtn.textContent = isOOS ? 'Out of Stock' : '+';
-  }
-
-  const fn = (e) => {
-    if (e) e.stopPropagation();
-    if (product.isOutOfStock) return;
-    triggerConfirmation(product);
-  };
-
-  if (featCard) featCard.onclick = isOOS ? null : fn;
-  if (featAddBtn) featAddBtn.onclick = isOOS ? null : fn;
+  TOP_SELLING_PRODUCTS.forEach(product => {
+    // Render using makeCard with star badge
+    const card = makeCard(product);
+    container.appendChild(card);
+  });
 }
 
 // ═════════════════════════════════════════
@@ -1669,9 +1511,15 @@ function makeCard(item) {
     ? `<button class="add-btn oos-btn disabled" disabled aria-label="Out of Stock">Out of Stock</button>`
     : `<button class="add-btn" aria-label="Add ${itemName}">+</button>`;
 
+  const isBestSeller = CATEGORY_TOP3_PRODUCT_IDS.has(item.productId);
+  const starBadgeHTML = isBestSeller
+    ? `<span class="bestseller-star-badge" title="Category Best Seller"><span class="star-icon">★</span> Best Seller</span>`
+    : '';
+
   d.innerHTML = `
-    <div class="item-img-wrap">
+    <div class="item-img-wrap ${isBestSeller ? 'has-bestseller-star' : ''}">
       ${stockBadgeHTML}
+      ${starBadgeHTML}
       ${promoLabel}
       <img class="item-img" src="${itemImgSrc}" alt="${itemName}" loading="lazy" onerror="this.onerror=null;this.src='placeholder.svg';" />
     </div>
@@ -1848,6 +1696,55 @@ function syncUI() {
   if (badge) badge.textContent = count;
 }
 
+function changeCartAddonQty(itemIdx, addonIdx, delta) {
+  if (CustomerSessionManager && CustomerSessionManager.isExpired) {
+    CustomerSessionManager.showExpiredOverlay();
+    return;
+  }
+  const item = cart[itemIdx];
+  if (!item || !item.addons || !item.addons[addonIdx]) return;
+  const addon = item.addons[addonIdx];
+  const newQty = (Number(addon.qty) || 1) + delta;
+  if (newQty < 1) return;
+  addon.qty = newQty;
+
+  // Recalculate addon total and item price
+  const addonTotal = item.addons.reduce((sum, a) => sum + (Number(a.price) || 0) * (Number(a.qty) || 1), 0);
+  item.addonTotal = addonTotal;
+  const initialPrice = Number(item.initialPrice != null ? item.initialPrice : (item.price - (item.addonTotal || 0)));
+  item.price = initialPrice + addonTotal;
+
+  syncUI();
+  renderCart();
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('changeAddonQty', true);
+}
+
+function removeCartAddon(itemIdx, addonIdx) {
+  if (CustomerSessionManager && CustomerSessionManager.isExpired) {
+    CustomerSessionManager.showExpiredOverlay();
+    return;
+  }
+  const item = cart[itemIdx];
+  if (!item || !item.addons || !item.addons[addonIdx]) return;
+  const removed = item.addons.splice(addonIdx, 1)[0];
+
+  // Recalculate addon total and item price
+  const addonTotal = item.addons.reduce((sum, a) => sum + (Number(a.price) || 0) * (Number(a.qty) || 1), 0);
+  item.addonTotal = addonTotal;
+  const initialPrice = Number(item.initialPrice != null ? item.initialPrice : (item.price - (item.addonTotal || 0)));
+  item.price = initialPrice + addonTotal;
+
+  syncUI();
+  renderCart();
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('removeAddon', true);
+  if (removed) {
+    showToast(`Removed add-on: ${removed.addonsName}`, 'info');
+  }
+}
+
+window.changeCartAddonQty = changeCartAddonQty;
+window.removeCartAddon = removeCartAddon;
+
 function renderCart() {
   const con = document.getElementById('cartItemsContainer');
   const total = cart.reduce((s,i) => s + i.price * i.qty, 0);
@@ -1863,15 +1760,22 @@ function renderCart() {
 
           const addonsHtml = hasAddons ? `
             <div class="ci-addons-list">
-              ${item.addons.map(a => {
+              ${item.addons.map((a, aIdx) => {
                 const aQty = Number(a.qty) || 1;
                 const aPrice = Number(a.price) || 0;
                 const aTotal = aPrice * aQty;
+                const isMinAddonQty = aQty <= 1;
                 return `
                 <div class="ci-addon-row">
                   <span class="ci-addon-bullet">•</span>
-                  <span class="ci-addon-name">${aQty > 1 ? aQty + 'x ' : ''}${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+                  <span class="ci-addon-name">${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
                   <span class="ci-addon-price">+₱${aTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                  <div class="ci-addon-ctrls">
+                    <button type="button" class="ci-addon-btn" onclick="changeCartAddonQty(${idx}, ${aIdx}, -1)" ${isMinAddonQty ? 'disabled' : ''} aria-label="Decrease addon">−</button>
+                    <span class="ci-addon-qty">${aQty}</span>
+                    <button type="button" class="ci-addon-btn" onclick="changeCartAddonQty(${idx}, ${aIdx}, 1)" aria-label="Increase addon">+</button>
+                  </div>
+                  <button type="button" class="ci-addon-remove-btn" onclick="removeCartAddon(${idx}, ${aIdx})" title="Remove add-on" aria-label="Remove add-on">✕</button>
                 </div>
               `;}).join('')}
             </div>
@@ -2417,8 +2321,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const promoCardEl = bannerCards[1];
     promoCardEl.style.cursor = 'pointer';
     promoCardEl.addEventListener('click', () => {
-      const fc = document.getElementById('featCard');
-      if (fc) fc.click();
+      const firstTopProd = (TOP_SELLING_PRODUCTS && TOP_SELLING_PRODUCTS[0]) || TOP_SELLING_PRODUCT || ALL_ITEMS.find(i => !i.isOutOfStock);
+      if (firstTopProd && !firstTopProd.isOutOfStock) {
+        triggerConfirmation(firstTopProd);
+      }
     });
   }
 });
@@ -3014,12 +2920,12 @@ if (btnDownloadPdf) {
   });
 }
 
-// Featured Card Binding (Top Selling Product)
+// Featured Card Binding (Top Selling Products)
 const fc = document.getElementById('featCard');
 if (fc) {
   const fcFn = (e) => {
     if (e) e.stopPropagation();
-    const targetProd = TOP_SELLING_PRODUCT || ALL_ITEMS.find(i => !i.isOutOfStock);
+    const targetProd = (TOP_SELLING_PRODUCTS && TOP_SELLING_PRODUCTS[0]) || TOP_SELLING_PRODUCT || ALL_ITEMS.find(i => !i.isOutOfStock);
     if (!targetProd || targetProd.isOutOfStock) return;
     triggerConfirmation(targetProd);
   };
@@ -4012,23 +3918,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const rescanModalCloseBtn = document.getElementById('rescanModalCloseBtn');
   const btnCloseRescanInfo = document.getElementById('btnCloseRescanInfo');
 
-  if (btnRescanInfo && rescanModalOverlay) {
-    btnRescanInfo.addEventListener('click', (e) => {
-      e.stopPropagation();
-      rescanModalOverlay.classList.remove('hidden');
-    });
-  }
-  [rescanModalCloseBtn, btnCloseRescanInfo].forEach(btn => {
-    if (btn && rescanModalOverlay) {
-      btn.addEventListener('click', () => {
-        rescanModalOverlay.classList.add('hidden');
-      });
-    }
-  });
-  if (rescanModalOverlay) {
-    rescanModalOverlay.addEventListener('click', (e) => {
-      if (e.target === rescanModalOverlay) {
-        rescanModalOverlay.classList.add('hidden');
+  const btnResetHome = document.getElementById('btnResetHome');
+  if (btnResetHome) {
+    btnResetHome.addEventListener('click', () => {
+      const expOverlay = document.getElementById('sessionExpiredOverlay');
+      if (expOverlay) expOverlay.classList.add('hidden');
+      if (typeof CustomerSessionManager !== 'undefined') {
+        CustomerSessionManager.handleSessionExpired();
+      } else {
+        goTo('welcomeScreen');
       }
     });
   }
