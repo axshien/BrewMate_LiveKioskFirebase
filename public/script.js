@@ -1760,6 +1760,7 @@ function renderCart() {
 
           const addonsHtml = hasAddons ? `
             <div class="ci-addons-list">
+              <div class="ci-addons-label">Add-ons</div>
               ${item.addons.map((a, aIdx) => {
                 const aQty = Number(a.qty) || 1;
                 const aPrice = Number(a.price) || 0;
@@ -1767,15 +1768,19 @@ function renderCart() {
                 const isMinAddonQty = aQty <= 1;
                 return `
                 <div class="ci-addon-row">
-                  <span class="ci-addon-bullet">•</span>
-                  <span class="ci-addon-name">${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
-                  <span class="ci-addon-price">+₱${aTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                  <div class="ci-addon-ctrls">
-                    <button type="button" class="ci-addon-btn" onclick="changeCartAddonQty(${idx}, ${aIdx}, -1)" ${isMinAddonQty ? 'disabled' : ''} aria-label="Decrease addon">−</button>
-                    <span class="ci-addon-qty">${aQty}</span>
-                    <button type="button" class="ci-addon-btn" onclick="changeCartAddonQty(${idx}, ${aIdx}, 1)" aria-label="Increase addon">+</button>
+                  <div class="ci-addon-left">
+                    <span class="ci-addon-bullet">•</span>
+                    <span class="ci-addon-name">${a.addonsName}${a.subSelection ? ` (${a.subSelection})` : ''}</span>
+                    <span class="ci-addon-price">+₱${aTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                   </div>
-                  <button type="button" class="ci-addon-remove-btn" onclick="removeCartAddon(${idx}, ${aIdx})" title="Remove add-on" aria-label="Remove add-on">✕</button>
+                  <div class="ci-addon-right">
+                    <div class="ci-addon-ctrls">
+                      <button type="button" class="ci-addon-btn" onclick="changeCartAddonQty(${idx}, ${aIdx}, -1)" ${isMinAddonQty ? 'disabled' : ''} aria-label="Decrease addon">−</button>
+                      <span class="ci-addon-qty">${aQty}</span>
+                      <button type="button" class="ci-addon-btn" onclick="changeCartAddonQty(${idx}, ${aIdx}, 1)" aria-label="Increase addon">+</button>
+                    </div>
+                    <button type="button" class="ci-addon-remove-btn" onclick="removeCartAddon(${idx}, ${aIdx})" title="Remove add-on" aria-label="Remove add-on">✕</button>
+                  </div>
                 </div>
               `;}).join('')}
             </div>
@@ -1783,31 +1788,33 @@ function renderCart() {
 
           return `
           <div class="cart-item">
-            <div class="ci-img-wrap">
-              <img class="ci-img" src="${item.imageUrl || 'placeholder.svg'}" alt="${item.displayName || item.name}" onerror="this.onerror=null;this.src='placeholder.svg';" />
-            </div>
-            <div class="ci-info">
-              <div class="ci-name">${item.displayName || item.name}</div>
-              <div class="ci-initial-price">
-                <span class="ci-initial-lbl">Initial Price:</span>
-                <span class="ci-initial-val">₱${initialPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+            <div class="cart-item-main">
+              <div class="ci-img-wrap">
+                <img class="ci-img" src="${item.imageUrl || 'placeholder.svg'}" alt="${item.displayName || item.name}" onerror="this.onerror=null;this.src='placeholder.svg';" />
               </div>
-              ${addonsHtml}
-              <div class="ci-line-total">
-                <span class="ci-total-lbl">Total:</span>
-                <span class="ci-price">₱${lineTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+              <div class="ci-info">
+                <div class="ci-name">${item.displayName || item.name}</div>
+                <div class="ci-initial-price">
+                  <span class="ci-initial-lbl">Initial Price:</span>
+                  <span class="ci-initial-val">₱${initialPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                </div>
+                <div class="ci-line-total">
+                  <span class="ci-total-lbl">Total:</span>
+                  <span class="ci-price">₱${lineTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                </div>
+              </div>
+              <div class="cart-item-actions">
+                <div class="qty-ctrl">
+                  <button class="qty-btn ${isMinQty ? 'disabled' : ''}" onclick="changeQty(${idx},-1)" ${isMinQty ? 'disabled' : ''} aria-label="Decrease quantity">−</button>
+                  <span class="qty-num">${item.qty}</span>
+                  <button class="qty-btn" onclick="changeQty(${idx},1)" aria-label="Increase quantity">+</button>
+                </div>
+                <button class="cart-remove-btn" onclick="removeItem(${idx})" aria-label="Remove ${item.displayName || item.name}">
+                  Remove
+                </button>
               </div>
             </div>
-            <div class="cart-item-actions">
-              <div class="qty-ctrl">
-                <button class="qty-btn ${isMinQty ? 'disabled' : ''}" onclick="changeQty(${idx},-1)" ${isMinQty ? 'disabled' : ''} aria-label="Decrease quantity">−</button>
-                <span class="qty-num">${item.qty}</span>
-                <button class="qty-btn" onclick="changeQty(${idx},1)" aria-label="Increase quantity">+</button>
-              </div>
-              <button class="cart-remove-btn" onclick="removeItem(${idx})" aria-label="Remove ${item.displayName || item.name}">
-                Remove
-              </button>
-            </div>
+            ${addonsHtml}
           </div>`;
         }).join('');
   }
