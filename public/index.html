@@ -130,13 +130,17 @@
       <div class="promo-slideshow hidden" id="promoSlideshow" style="display: none;"></div>
     </div>
 
-    <!-- Pills -->
-    <div class="search-container">
-      <input type="text" id="menuSearch" placeholder="Search menu, categories, or tags..." autocomplete="off">
-    </div>
+    <!-- Sticky Menu Controls Bar (Pinned when scrolling down) -->
+    <div class="sticky-menu-controls" id="stickyMenuControls">
+      <div class="search-container">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input type="text" id="menuSearch" placeholder="Search menu, categories, or tags..." autocomplete="off">
+        <button type="button" id="menuSearchClear" class="search-clear-btn hidden" aria-label="Clear search">&times;</button>
+      </div>
 
-    <div class="cat-row" id="categoryContainer">
-      <button class="cat-pill active" data-cat="all">All</button>
+      <div class="cat-row" id="categoryContainer">
+        <button class="cat-pill active" data-cat="all">All</button>
+      </div>
     </div>
 
     <div id="searchResultsContainer" class="hidden">
@@ -176,7 +180,7 @@
     <div class="cart-sidebar">
       <div class="notes-card" style="margin-bottom: 14px;">
         <div class="notes-label">Nickname for Cup <span style="color: #e74c3c;">*</span></div>
-        <input type="text" id="customerNickname" class="nickname-input" placeholder="Enter name (required)" autocomplete="off" maxlength="15" oninput="checkOrderValidation()" />
+        <input type="text" id="customerNickname" class="nickname-input" placeholder="Enter name (required)" autocomplete="off" maxlength="30" oninput="checkOrderValidation()" />
       </div>
 
       <div class="notes-card" style="margin-bottom: 14px;">
@@ -377,6 +381,12 @@
       <div id="modal-recipe-text" class="ingredients-text">Espresso, Hot Water</div>
     </div>
     
+    <!-- Flavor Section for products with flavor options (e.g. Flavored Fries) -->
+    <div class="size-section hidden" id="modal-flavor-section">
+      <div class="addon-label">Flavor</div>
+      <div class="addon-options" id="modal-flavor-options"></div>
+    </div>
+
     <div class="size-section" id="modal-size-section">
       <div class="addon-label">Size</div>
       <div class="addon-options" id="modal-size-options">

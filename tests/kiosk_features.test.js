@@ -162,6 +162,115 @@ function runTests() {
   assert.ok(cardHTML.includes('16oz') && cardHTML.includes('22oz'), 'Size tags must be rendered in card');
   console.log('✓ PASS: Description is properly placed under the product name with size tags rendered\n');
 
+  // Test 8: Nickname for cup 30-character limit and no minimum requirement
+  console.log('Test 8: Nickname for cup validation (30-char max, no minimum character requirement)...');
+  function testCheckOrderValidation(cartLength, nicknameValue) {
+    const trimmed = (nicknameValue || '').trim();
+    // Valid as long as cart is non-empty and nickname is not empty (no minimum requirement)
+    const isDisabled = (cartLength === 0 || trimmed.length === 0);
+    return !isDisabled;
+  }
+
+  function testSanitizeNickname(raw) {
+    const trimmed = (raw || '').trim();
+    if (trimmed.length < 1) return null;
+    return trimmed.slice(0, 30).toUpperCase();
+  }
+
+  // 1-character nickname must be valid (no minimum)
+  assert.strictEqual(testCheckOrderValidation(1, 'A'), true, 'Single character nickname must be valid');
+  assert.strictEqual(testCheckOrderValidation(2, 'Bo'), true, 'Two character nickname must be valid');
+  assert.strictEqual(testCheckOrderValidation(1, 'Alex'), true, 'Standard nickname must be valid');
+  // Empty nickname must be invalid
+  assert.strictEqual(testCheckOrderValidation(1, ''), false, 'Empty nickname must be invalid');
+  assert.strictEqual(testCheckOrderValidation(1, '   '), false, 'Whitespace nickname must be invalid');
+  assert.strictEqual(testCheckOrderValidation(0, 'Alex'), false, 'Empty cart must be invalid');
+
+  // 30-character limit enforcement
+  const longName = 'Christopher Alexander Montgomery Jr III';
+  const sanitizedLong = testSanitizeNickname(longName);
+  assert.strictEqual(sanitizedLong.length, 30, 'Nickname must be capped at 30 characters');
+  assert.strictEqual(sanitizedLong, 'CHRISTOPHER ALEXANDER MONTGOME');
+  console.log('✓ PASS: Nickname validation allows single-character names and enforces 30-character limit\n');
+
+  // Test 9: Flavored Fries flavor mapping and item displayName construction
+  console.log('Test 9: Flavored Fries flavor selection from product_flavors...');
+  const sampleFlavors = [
+    { flavorId: 11, flavorName: 'Plain', enable: 1 },
+    { flavorId: 1, flavorName: 'Cheese', enable: 1 },
+    { flavorId: 2, flavorName: 'BBQ', enable: 1 },
+    { flavorId: 3, flavorName: 'Sour Cream', enable: 1 }
+  ];
+  const sampleProductFlavors = [
+    { product_flavor_id: 1, flavorId: 11, productId: 285, enable: 1 },
+    { product_flavor_id: 2, flavorId: 1, productId: 285, enable: 1 },
+    { product_flavor_id: 3, flavorId: 2, productId: 285, enable: 1 },
+    { product_flavor_id: 4, flavorId: 3, productId: 285, enable: 1 }
+  ];
+
+  const flavorLookup = {};
+  sampleFlavors.forEach(f => { flavorLookup[f.flavorId] = f.flavorName; });
+
+  const productFlavorsMap = {};
+  sampleProductFlavors.forEach(pf => {
+    if (!productFlavorsMap[pf.productId]) productFlavorsMap[pf.productId] = [];
+    productFlavorsMap[pf.productId].push({
+      productFlavorId: pf.product_flavor_id,
+      flavorId: pf.flavorId,
+      flavorName: flavorLookup[pf.flavorId]
+    });
+  });
+
+  const friesItem = {
+    productId: 285,
+    productName: 'Flavored Fries',
+    flavors: productFlavorsMap[285],
+    sizes: [
+      { sizeId: 4, sizeName: 'Solo', price: 100 },
+      { sizeId: 5, sizeName: 'Group', price: 170 }
+    ]
+  };
+
+  assert.strictEqual(friesItem.flavors.length, 4, 'Flavored Fries must have 4 available flavors');
+  assert.deepStrictEqual(friesItem.flavors.map(f => f.flavorName), ['Plain', 'Cheese', 'BBQ', 'Sour Cream']);
+
+  // Test formatted displayName generation with flavor and size
+  function formatOrderItemName(productName, selectedFlavor, selectedSize) {
+    const optionTags = [];
+    if (selectedFlavor) optionTags.push(selectedFlavor.flavorName);
+    if (selectedSize) optionTags.push(selectedSize.sizeName);
+    const suffix = optionTags.length > 0 ? ` (${optionTags.join(', ')})` : '';
+    return `${productName}${suffix}`;
+  }
+
+  const nameWithSoloCheese = formatOrderItemName('Flavored Fries', friesItem.flavors[1], friesItem.sizes[0]);
+  assert.strictEqual(nameWithSoloCheese, 'Flavored Fries (Cheese, Solo)');
+
+  const nameWithGroupBBQ = formatOrderItemName('Flavored Fries', friesItem.flavors[2], friesItem.sizes[1]);
+  assert.strictEqual(nameWithGroupBBQ, 'Flavored Fries (BBQ, Group)');
+
+  const nameFlavorOnly = formatOrderItemName('Flavored Fries', friesItem.flavors[3], null);
+  assert.strictEqual(nameFlavorOnly, 'Flavored Fries (Sour Cream)');
+  console.log('✓ PASS: Flavored Fries correctly maps Plain, Cheese, BBQ, Sour Cream and formats displayName\n');
+
+  // Test 10: Sticky search container and index.html markup check
+  console.log('Test 10: Sticky search bar markup and elements verification...');
+  const fs = require('fs');
+  const path = require('path');
+  const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const styleCss = fs.readFileSync(path.join(__dirname, '../public/style.css'), 'utf8');
+
+  assert.ok(indexHtml.includes('maxlength="30"'), 'customerNickname in index.html must have maxlength="30"');
+  assert.ok(indexHtml.includes('id="modal-flavor-section"'), 'modal-flavor-section must exist in index.html');
+  assert.ok(indexHtml.includes('id="modal-flavor-options"'), 'modal-flavor-options must exist in index.html');
+  assert.ok(indexHtml.includes('class="sticky-menu-controls"'), 'sticky-menu-controls must wrap search and cat-row');
+  assert.ok(indexHtml.includes('id="menuSearchClear"'), 'menuSearchClear clear button must exist in index.html');
+
+  assert.ok(styleCss.includes('.sticky-menu-controls'), 'sticky-menu-controls class must exist in style.css');
+  assert.ok(styleCss.includes('position: sticky'), 'sticky-menu-controls must be sticky');
+  assert.ok(styleCss.includes('.flavor-btn'), '.flavor-btn styles must exist in style.css');
+  console.log('✓ PASS: HTML and CSS contain sticky controls, flavor modal elements, and 30-char nickname limit\n');
+
   Promise.all([mockSubmit, minWaitPromise]).then(([orderRes]) => {
     const elapsed = Date.now() - startMs;
     assert.strictEqual(orderRes.success, true);

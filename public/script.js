@@ -6,6 +6,9 @@ let ALL_PRODUCT_ADDONS = [];
 let ALL_RECIPES = [];
 let ALL_INGREDIENTS = [];
 let ALL_ADDON_RECIPES = {};
+let ALL_FLAVORS = [];
+let ALL_PRODUCT_FLAVORS = [];
+let currentSelectedFlavor = null;
 let ALL_PROMOTIONS = [];        // Active promotions from chill_promotion
 let PROMO_PRODUCT_IDS = {};    // Map: productId -> promotion object
 let TOP_SELLING_PRODUCT = null;
@@ -969,6 +972,46 @@ async function loadMenuFromSupabase() {
       .eq('enabled', 1);
     if (promoProdData) promotionProductsList = promoProdData;
 
+    // Fetch product flavors (chill_product_flavors with fallback to product_flavors)
+    let productFlavorsList = [];
+    try {
+      const { data: pfData, error: pfErr } = await db
+        .from('chill_product_flavors')
+        .select('*');
+      if (!pfErr && pfData) {
+        productFlavorsList = pfData.filter(pf => pf.enable === 1 || pf.enabled === 1 || pf.enable === true || pf.enabled === true || (pf.enable === undefined && pf.enabled === undefined));
+      } else {
+        const { data: pfData2 } = await db
+          .from('product_flavors')
+          .select('*');
+        if (pfData2) {
+          productFlavorsList = pfData2.filter(pf => pf.enable === 1 || pf.enabled === 1 || pf.enable === true || pf.enabled === true || (pf.enable === undefined && pf.enabled === undefined));
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch product flavors:", e);
+    }
+
+    // Fetch flavors (chill_flavors with fallback to flavors)
+    let flavorsList = [];
+    try {
+      const { data: fData, error: fErr } = await db
+        .from('chill_flavors')
+        .select('*');
+      if (!fErr && fData) {
+        flavorsList = fData.filter(f => f.enable === 1 || f.enabled === 1 || f.enable === true || f.enabled === true || (f.enable === undefined && f.enabled === undefined));
+      } else {
+        const { data: fData2 } = await db
+          .from('flavors')
+          .select('*');
+        if (fData2) {
+          flavorsList = fData2.filter(f => f.enable === 1 || f.enabled === 1 || f.enable === true || f.enabled === true || (f.enable === undefined && f.enabled === undefined));
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch flavors:", e);
+    }
+
     ALL_PROMOTIONS = promotionsList;
     buildPromoMap(promotionsList, promotionProductsList);
 
@@ -978,6 +1021,8 @@ async function loadMenuFromSupabase() {
     ALL_PRODUCT_ADDONS = productAddonsList;
     ALL_RECIPES = recipesList;
     ALL_INGREDIENTS = ingredientsList;
+    ALL_FLAVORS = flavorsList;
+    ALL_PRODUCT_FLAVORS = productFlavorsList;
 
     // Map sizes by sizeId
     const sizeLookup = {};
@@ -1027,6 +1072,35 @@ async function loadMenuFromSupabase() {
       if (addonLookup[pa.addonsId]) {
         productAddonsMap[pa.productId].push(addonLookup[pa.addonsId]);
       }
+    });
+
+    // Map flavors by flavorId
+    const flavorLookup = {};
+    flavorsList.forEach(f => {
+      const fId = f.flavorId !== undefined && f.flavorId !== null ? f.flavorId : f.id;
+      const fName = f.flavorName || f.name || `Flavor ${fId}`;
+      if (fId !== undefined && fId !== null) {
+        flavorLookup[fId] = fName;
+        flavorLookup[String(fId).trim()] = fName;
+      }
+    });
+
+    // Map product flavors by productId
+    const productFlavorsMap = {};
+    productFlavorsList.forEach(pf => {
+      const pId = pf.productId !== undefined && pf.productId !== null ? pf.productId : pf.product_id;
+      if (pId === null || pId === undefined) return;
+      const key = String(pId).trim();
+      if (!productFlavorsMap[key]) {
+        productFlavorsMap[key] = [];
+      }
+      const fId = pf.flavorId !== undefined && pf.flavorId !== null ? pf.flavorId : pf.flavor_id;
+      const fName = (fId !== null && flavorLookup[fId]) || pf.flavorName || `Flavor ${fId || ''}`;
+      productFlavorsMap[key].push({
+        productFlavorId: pf.product_flavor_id || pf.productFlavorId || pf.id,
+        flavorId: fId,
+        flavorName: fName
+      });
     });
 
     // Build recipe & ingredient stock maps first before building product items
@@ -1117,6 +1191,16 @@ async function loadMenuFromSupabase() {
         const catId = Number(item.categoryId);
         const catName = CATEGORY_LOOKUP[catId] || item.categoryName || '';
 
+        let itemFlavors = (productFlavorsMap[pKey] || productFlavorsMap[item.productId] || productFlavorsMap[Number(item.productId)] || []).slice();
+        if (itemFlavors.length === 0 && (Number(item.productId) === 285 || (item.productName && item.productName.toLowerCase().includes('flavored fries')))) {
+          itemFlavors = [
+            { flavorId: 11, flavorName: 'Plain' },
+            { flavorId: 1, flavorName: 'Cheese' },
+            { flavorId: 2, flavorName: 'BBQ' },
+            { flavorId: 3, flavorName: 'Sour Cream' }
+          ];
+        }
+
         return {
           ...item,
           productId: pId,
@@ -1129,6 +1213,7 @@ async function loadMenuFromSupabase() {
           recipe: recipeText,
           ingredients: ingList,
           sizes: itemSizes,
+          flavors: itemFlavors,
           addons: productAddonsMap[item.productId] || productAddonsMap[pKey] || [],
           hasSizes,
           minPrice,
@@ -1625,9 +1710,10 @@ function addItem(name, imageUrl, price, desc, details = {}) {
   const isPromoItem = name.includes('[-20%') || name.includes('B1T1 Claimed');
   const qtyToAdd = details.qty && Number(details.qty) > 0 ? Number(details.qty) : 1;
   
-  // Signature based on displayName and selected addons to allow grouping identical items
+  // Signature based on displayName, flavor, and selected addons to allow grouping identical items
+  const flavorKey = details.flavor ? (details.flavor.flavorId || details.flavor.flavorName) : '';
   const addonKey = (details.addons || []).map(a => `${a.addonsId}_${a.qty || 1}_${a.subSelection || ''}`).sort().join(';');
-  const itemKey = `${details.displayName || name}__${addonKey}`;
+  const itemKey = `${details.displayName || name}__${flavorKey}__${addonKey}`;
 
   const ex = cart.find(i => (i.itemKey && i.itemKey === itemKey) || i.name === name);
   
@@ -1642,6 +1728,8 @@ function addItem(name, imageUrl, price, desc, details = {}) {
       itemKey: itemKey,
       name: name,
       displayName: details.displayName || name,
+      flavor: details.flavor || null,
+      flavorName: details.flavorName || (details.flavor ? details.flavor.flavorName : null),
       imageUrl: imageUrl || 'placeholder.svg',
       initialPrice: details.initialPrice != null ? Number(details.initialPrice) : Number(price),
       originalBasePrice: details.originalBasePrice != null ? Number(details.originalBasePrice) : Number(price),
@@ -1864,7 +1952,7 @@ function checkOrderValidation() {
   const nickInput = document.getElementById('customerNickname');
   const placeBtn = document.getElementById('placeOrderBtn');
   if (!nickInput || !placeBtn) return;
-  placeBtn.disabled = (cart.length === 0 || nickInput.value.trim().length < 3);
+  placeBtn.disabled = (cart.length === 0 || nickInput.value.trim().length === 0);
 }
 
 let currentPaymentMethod = 'Cash';
@@ -1930,10 +2018,11 @@ async function placeOrder() {
   }
   if (!cart.length) return;
   const nicknameInput = document.getElementById('customerNickname').value.trim();
-  if (nicknameInput.length < 3) {
-    showToast('Please enter a nickname (at least 3 letters)', 'warning');
+  if (!nicknameInput || nicknameInput.length < 1) {
+    showToast('Please enter a nickname for your cup', 'warning');
     return;
   }
+  const safeNickname = nicknameInput.slice(0, 30).toUpperCase();
 
   const emailInput = document.getElementById('customerEmail')?.value.trim() || '';
   const notesInput = document.getElementById('orderNotes')?.value.trim() || '';
@@ -1946,7 +2035,7 @@ async function placeOrder() {
   // 2. Prepare payload including special instructions
   const kioskPayload = {
     kioskordernumber: String(orderNumber),
-    customerName: nicknameInput.toUpperCase(),
+    customerName: safeNickname,
     customerEmail: emailInput || null,
     orderType: currentOrderType,
     special_instructions: notesInput || null,
@@ -1955,6 +2044,8 @@ async function placeOrder() {
     items: cart.map(item => ({
       name: item.name,
       displayName: item.displayName || item.name,
+      flavor: item.flavor || null,
+      flavorName: item.flavorName || (item.flavor ? item.flavor.flavorName : null),
       initialPrice: item.initialPrice != null ? Number(item.initialPrice) : Number(item.price),
       addons: item.addons || [],
       addonTotal: item.addonTotal || 0,
@@ -2014,7 +2105,7 @@ async function placeOrder() {
   const invoiceString = `#INV-${orderNumber}`;
   const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  const finalNickname = nicknameInput.toUpperCase();
+  const finalNickname = safeNickname;
 
   // Populate Order Details
   document.getElementById('queueNum').textContent = orderNumber;
@@ -2350,9 +2441,24 @@ if (showItemsBtn) {
 function removeAccents(str) { return str.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
 
 const menuSearchInput = document.getElementById('menuSearch');
+const menuSearchClear = document.getElementById('menuSearchClear');
+if (menuSearchClear && menuSearchInput) {
+  menuSearchClear.addEventListener('click', () => {
+    menuSearchInput.value = '';
+    menuSearchClear.classList.add('hidden');
+    menuSearchInput.dispatchEvent(new Event('input'));
+    menuSearchInput.focus();
+  });
+}
+
 if (menuSearchInput) {
   menuSearchInput.addEventListener('input', (e) => {
-    const query = removeAccents(e.target.value.trim().toLowerCase());
+    const rawVal = e.target.value.trim();
+    if (menuSearchClear) {
+      if (rawVal.length > 0) menuSearchClear.classList.remove('hidden');
+      else menuSearchClear.classList.add('hidden');
+    }
+    const query = removeAccents(rawVal.toLowerCase());
     const mainContent = document.querySelectorAll('.filterable-title, .filterable-item'); 
     const searchContainer = document.getElementById('searchResultsContainer');
     const searchGrid = document.getElementById('searchResultsGrid');
@@ -2548,6 +2654,42 @@ function triggerConfirmation(item) {
     } else {
       recipeContent.style.display = 'none';
     }
+  }
+
+  // Dynamic Flavor Selection (e.g. for Flavored Fries or any product with flavors in chill_product_flavors)
+  const flavorSection = document.getElementById('modal-flavor-section');
+  const flavorOptionsContainer = document.getElementById('modal-flavor-options');
+  const hasItemFlavors = item.flavors && item.flavors.length > 0;
+  if (hasItemFlavors) {
+    if (flavorSection) flavorSection.classList.remove('hidden');
+    currentSelectedFlavor = item.flavors[0];
+
+    if (flavorOptionsContainer) {
+      flavorOptionsContainer.innerHTML = item.flavors.map((f, idx) => `
+        <button type="button" class="flavor-btn ${idx === 0 ? 'active' : ''}" 
+                data-flavor-id="${f.flavorId}" 
+                data-flavor-name="${f.flavorName}">
+          ${f.flavorName}
+        </button>
+      `).join('');
+
+      flavorOptionsContainer.querySelectorAll('.flavor-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          flavorOptionsContainer.querySelectorAll('.flavor-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const fId = Number(btn.dataset.flavorId);
+          currentSelectedFlavor = item.flavors.find(f => f.flavorId === fId) || {
+            flavorId: fId,
+            flavorName: btn.dataset.flavorName
+          };
+          updateModalPrice();
+        });
+      });
+    }
+  } else {
+    currentSelectedFlavor = null;
+    if (flavorSection) flavorSection.classList.add('hidden');
+    if (flavorOptionsContainer) flavorOptionsContainer.innerHTML = '';
   }
 
   // Dynamic Sizes
@@ -2810,6 +2952,7 @@ if (modalCloseBtn) {
   modalCloseBtn.addEventListener('click', () => {
     if (confirmationOverlay) confirmationOverlay.classList.add('hidden');
     itemPendingConfirmation = null;
+    currentSelectedFlavor = null;
   });
 }
 
@@ -2823,8 +2966,15 @@ if (confirmOrderBtn) {
       }
       
       const rawName = itemPendingConfirmation.productName || itemPendingConfirmation.name;
-      const sizeLabel = currentSelectedSize ? ` (${currentSelectedSize.sizeName})` : '';
-      const displayName = `${rawName}${sizeLabel}`;
+      const optionTags = [];
+      if (currentSelectedFlavor) {
+        optionTags.push(currentSelectedFlavor.flavorName);
+      }
+      if (currentSelectedSize) {
+        optionTags.push(currentSelectedSize.sizeName);
+      }
+      const optionSuffix = optionTags.length > 0 ? ` (${optionTags.join(', ')})` : '';
+      const displayName = `${rawName}${optionSuffix}`;
       
       const basePrice = currentSelectedSize ? currentSelectedSize.price : (Number(itemPendingConfirmation.price || itemPendingConfirmation.minPrice || 0));
       const promo = itemPendingConfirmation.promo || null;
@@ -2858,6 +3008,8 @@ if (confirmOrderBtn) {
         initialPrice: discountedBase,
         originalBasePrice: basePrice,
         promo: promo,
+        flavor: currentSelectedFlavor,
+        flavorName: currentSelectedFlavor ? currentSelectedFlavor.flavorName : null,
         addons: addonsCopy,
         addonTotal: addonTotal,
         qty: currentModalQty
@@ -2865,6 +3017,7 @@ if (confirmOrderBtn) {
 
       if (confirmationOverlay) confirmationOverlay.classList.add('hidden');
       itemPendingConfirmation = null;
+      currentSelectedFlavor = null;
     }
   });
 }
@@ -2875,7 +3028,10 @@ const quizModalOverlay = document.getElementById('quiz-modal-overlay');
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
         overlay.classList.add('hidden');
-        if (overlay === confirmationOverlay) itemPendingConfirmation = null;
+        if (overlay === confirmationOverlay) {
+          itemPendingConfirmation = null;
+          currentSelectedFlavor = null;
+        }
         if (overlay === quizModalOverlay) {
           quizModalOverlay.style.opacity = '0';
           quizModalOverlay.style.pointerEvents = 'none';
