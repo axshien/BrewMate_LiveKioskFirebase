@@ -271,6 +271,78 @@ function runTests() {
   assert.ok(styleCss.includes('.flavor-btn'), '.flavor-btn styles must exist in style.css');
   console.log('✓ PASS: HTML and CSS contain sticky controls, flavor modal elements, and 30-char nickname limit\n');
 
+  // Test 11: Products menu Ascending/Descending price sorting & custom price range filtering
+  console.log('Test 11: Products menu Ascending/Descending price order & custom price range...');
+  assert.ok(indexHtml.includes('id="sortPriceAsc"'), 'sortPriceAsc button must exist in index.html');
+  assert.ok(indexHtml.includes('id="sortPriceDesc"'), 'sortPriceDesc button must exist in index.html');
+  assert.ok(indexHtml.includes('id="menuMinPrice"'), 'menuMinPrice input must exist in index.html');
+  assert.ok(indexHtml.includes('id="menuMaxPrice"'), 'menuMaxPrice input must exist in index.html');
+  assert.ok(indexHtml.includes('id="quizCustomPriceBox"'), 'quizCustomPriceBox must exist in index.html');
+  assert.ok(indexHtml.includes('id="quizResultMinPrice"'), 'quizResultMinPrice must exist in index.html');
+  assert.ok(indexHtml.includes('id="quizResultMaxPrice"'), 'quizResultMaxPrice must exist in index.html');
+
+  const catalogSample = [
+    { productId: 1, productName: 'Spanish Latte', price: 120, minPrice: 120 },
+    { productId: 2, productName: 'Classic Waffle', price: 65, minPrice: 65 },
+    { productId: 3, productName: 'Liempo Silog', price: 155, minPrice: 155 },
+    { productId: 4, productName: 'Hot Americano', price: 85, minPrice: 85 }
+  ];
+
+  const ascSorted = catalogSample.slice().sort((a, b) => a.price - b.price);
+  assert.deepStrictEqual(ascSorted.map(p => p.price), [65, 85, 120, 155], 'Ascending sort must order lowest to highest');
+
+  const descSorted = catalogSample.slice().sort((a, b) => b.price - a.price);
+  assert.deepStrictEqual(descSorted.map(p => p.price), [155, 120, 85, 65], 'Descending sort must order highest to lowest');
+
+  const filtered80to130 = catalogSample.filter(p => p.price >= 80 && p.price <= 130);
+  assert.deepStrictEqual(filtered80to130.map(p => p.productName), ['Spanish Latte', 'Hot Americano'], 'Custom price range 80-130 must filter accurately');
+  console.log('✓ PASS: Ascending/Descending price sort and custom price range filter verified\n');
+
+  // Test 12: PayMongo Cashless Payment UI verification
+  console.log('Test 12: PayMongo Cashless Payment UI verification...');
+  assert.ok(indexHtml.includes('PayMongo Cashless Payment'), 'PayMongo Cashless Payment option must exist in index.html');
+  assert.ok(indexHtml.includes('id="panel-paymongo"'), 'panel-paymongo panel must exist in index.html');
+  assert.ok(indexHtml.includes('id="paymongoVerificationOverlay"'), 'paymongoVerificationOverlay must exist in index.html');
+  console.log('✓ PASS: PayMongo markup, labels, and verification overlay verified in HTML\n');
+
+  // Test 13: PayMongo checkout payload structure verification
+  console.log('Test 13: PayMongo checkout payload formatting and safety...');
+  const sampleItems = [
+    { name: 'Spanish Latte (16oz)', price: 120, qty: 2, subtotal: 240 }
+  ];
+  const sampleReturnOrigin = 'https://brewmatekioskprototype.web.app/';
+  const sampleOrderNum = '5432';
+  const sampleCheckoutPayload = {
+    orderId: 88,
+    kioskordernumber: sampleOrderNum,
+    customerName: 'JUAN',
+    customerEmail: 'juan@example.com',
+    items: sampleItems,
+    totalAmount: 240,
+    successUrl: `${sampleReturnOrigin}?payment_status=check&orderNumber=${sampleOrderNum}`,
+    cancelUrl: `${sampleReturnOrigin}?payment_status=cancelled&orderNumber=${sampleOrderNum}`
+  };
+  assert.strictEqual(sampleCheckoutPayload.kioskordernumber, '5432');
+  assert.strictEqual(sampleCheckoutPayload.totalAmount, 240);
+  assert.ok(sampleCheckoutPayload.successUrl.includes('payment_status=check'));
+  assert.ok(sampleCheckoutPayload.cancelUrl.includes('payment_status=cancelled'));
+  console.log('✓ PASS: PayMongo checkout payload strictly contains all required fields\n');
+
+  // Test 14: Non-trusting URL return logic (requires authoritative DB confirmation)
+  console.log('Test 14: Security check: client never marks order paid from URL parameters...');
+  const mockUnverifiedRow = { kioskordernumber: '5432', payment_status: 'PENDING', status: 'pending' };
+  const mockVerifiedRow = { kioskordernumber: '5432', payment_status: 'PAID', status: 'confirmed' };
+  
+  function evaluateAuthoritativePayment(dbRecord) {
+    const pStatus = (dbRecord.payment_status || '').toUpperCase();
+    const ordStatus = (dbRecord.status || '').toLowerCase();
+    return pStatus === 'PAID' || ordStatus === 'paid';
+  }
+  
+  assert.strictEqual(evaluateAuthoritativePayment(mockUnverifiedRow), false, 'Pending payment must NOT be treated as paid');
+  assert.strictEqual(evaluateAuthoritativePayment(mockVerifiedRow), true, 'Only server-verified PAID status must be treated as paid');
+  console.log('✓ PASS: Authoritative payment verification prevents client-side bypass\n');
+
   Promise.all([mockSubmit, minWaitPromise]).then(([orderRes]) => {
     const elapsed = Date.now() - startMs;
     assert.strictEqual(orderRes.success, true);

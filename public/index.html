@@ -44,6 +44,23 @@
   </div>
 </div>
 
+<!-- ══ PAYMONGO PAYMENT VERIFICATION OVERLAY ══ -->
+<div id="paymongoVerificationOverlay" class="order-loading-overlay hidden" aria-live="assertive" role="alert">
+  <div class="order-loading-card">
+    <div class="order-loading-spinner-wrap">
+      <div class="order-loading-cup-icon">💳</div>
+      <div class="order-loading-spinner-ring" style="border-top-color: #8B5CF6;"></div>
+    </div>
+    <h2 class="order-loading-title" id="paymongoVerifyTitle">Verifying Payment...</h2>
+    <p class="order-loading-msg" id="paymongoVerifyMsg">Connecting to ChillVentory server</p>
+    <div class="order-loading-progress-track">
+      <div class="order-loading-progress-bar active" id="paymongoVerifyProgressBar"></div>
+    </div>
+    <div class="order-loading-status" id="paymongoVerifyStatus">Checking authoritative payment status...</div>
+    <button id="cancelPaymongoWaitingBtn" class="quiz-btn hidden" type="button" style="margin-top: 16px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 18px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer;">Return to Cart</button>
+  </div>
+</div>
+
 <!-- ══ SESSION RESET OVERLAY ══ -->
 <div id="sessionExpiredOverlay" class="session-expired-overlay hidden" aria-live="assertive" role="alertdialog">
   <div class="session-expired-card">
@@ -138,6 +155,30 @@
         <button type="button" id="menuSearchClear" class="search-clear-btn hidden" aria-label="Clear search">&times;</button>
       </div>
 
+      <!-- Price Sort (Ascending / Descending) & Custom Price Range Controls -->
+      <div class="menu-price-controls" id="menuPriceControls">
+        <div class="price-sort-group" role="group" aria-label="Sort products by price">
+          <span class="price-ctrl-label">Price Order:</span>
+          <button type="button" class="price-sort-pill active" id="sortPriceDefault" data-sort="default">Default</button>
+          <button type="button" class="price-sort-pill" id="sortPriceAsc" data-sort="asc" title="Sort price from lowest to highest">↑ Ascending</button>
+          <button type="button" class="price-sort-pill" id="sortPriceDesc" data-sort="desc" title="Sort price from highest to lowest">↓ Descending</button>
+        </div>
+
+        <div class="price-range-group" role="group" aria-label="Custom price range filter">
+          <span class="price-ctrl-label">Price Range:</span>
+          <div class="price-input-wrap">
+            <span class="currency-prefix">₱</span>
+            <input type="number" id="menuMinPrice" class="price-range-input" placeholder="Min" min="0" step="1" inputmode="numeric" aria-label="Minimum price">
+          </div>
+          <span class="price-range-sep">–</span>
+          <div class="price-input-wrap">
+            <span class="currency-prefix">₱</span>
+            <input type="number" id="menuMaxPrice" class="price-range-input" placeholder="Max" min="0" step="1" inputmode="numeric" aria-label="Maximum price">
+          </div>
+          <button type="button" id="menuPriceResetBtn" class="price-reset-btn hidden" title="Reset price filter and sort">Reset</button>
+        </div>
+      </div>
+
       <div class="cat-row" id="categoryContainer">
         <button class="cat-pill active" data-cat="all">All</button>
       </div>
@@ -158,6 +199,10 @@
     </div>
 
     <div id="menuCategoriesSections"></div>
+    <div id="menuPriceEmptyState" class="empty-state hidden" style="margin-top: 24px;">
+      <p id="menuPriceEmptyText">No products found in this price range.</p>
+      <button type="button" id="menuEmptyResetBtn" class="price-empty-reset-btn">Reset Price Filter</button>
+    </div>
   </div>
 </div>
 
@@ -228,6 +273,11 @@
       <span class="pay-custom"></span>
       E-Wallets
     </label>
+    <label class="pay-radio">
+      <input type="radio" name="payment" value="PayMongo Cashless Payment">
+      <span class="pay-custom"></span>
+      PayMongo Cashless Payment
+    </label>
   </div>
 
   <div id="panel-cash" class="pay-panel">
@@ -242,6 +292,10 @@
     </select>
     <p>Scan the QR to pay</p>
   </div>
+
+  <div id="panel-paymongo" class="pay-panel hidden">
+    <p>Pay securely via GCash, Maya, GrabPay, or Card through PayMongo Hosted Checkout.</p>
+  </div>
 </div>
 
       <button class="btn-place" id="placeOrderBtn" disabled>Place Order →</button>
@@ -255,13 +309,14 @@
     
     <div class="panel-section">
       <div class="quiz-badge-wrap">
-        <span class="quiz-step-badge" id="quizStepBadge">Step 1 of 4</span>
+        <span class="quiz-step-badge" id="quizStepBadge">Step 1 of 5</span>
       </div>
       <div class="subtitle">YOUR VIRTUAL BARISTA</div>
       <h2 id="quiz-question" class="title">What are you in the mood for?</h2>
       <p id="quiz-hint" style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: -14px; margin-bottom: 22px;">Let us help find your perfect match</p>
       
       <div id="quiz-options" class="button-group"></div>
+      <div id="quizCustomPriceBox" class="quiz-custom-price-box hidden"></div>
       
       <div class="quiz-nav-row" style="display: flex; gap: 14px; align-items: center; margin-top: 24px; position: relative; z-index: 2;">
         <button id="quiz-back-btn" class="hidden" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--sans);">← Back</button>
@@ -271,10 +326,34 @@
     </div>
 
     <div id="cravingResultsSection" class="hidden" style="background: var(--bg); padding: 24px 20px; border-radius: 0 0 24px 24px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
         <h3 style="font-family: var(--serif); font-size: 20px; color: var(--text); margin: 0;">We recommend for you...</h3>
         <button id="quiz-restart-btn" style="background: var(--primary-bg); color: var(--primary); border: none; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--sans);">↺ Try Again</button>
       </div>
+
+      <!-- Custom Price Range & Price Sort Controls inside Recommendation Results -->
+      <div class="quiz-results-price-bar" id="quizResultsPriceBar">
+        <div class="quiz-res-range-group">
+          <span class="quiz-res-label">Custom Price:</span>
+          <div class="price-input-wrap">
+            <span class="currency-prefix">₱</span>
+            <input type="number" id="quizResultMinPrice" class="price-range-input" placeholder="Min" min="0" step="1" inputmode="numeric" aria-label="Recommendation minimum price">
+          </div>
+          <span class="price-range-sep">–</span>
+          <div class="price-input-wrap">
+            <span class="currency-prefix">₱</span>
+            <input type="number" id="quizResultMaxPrice" class="price-range-input" placeholder="Max" min="0" step="1" inputmode="numeric" aria-label="Recommendation maximum price">
+          </div>
+          <button type="button" id="quizResultApplyPriceBtn" class="quiz-price-apply-sm">Apply</button>
+          <button type="button" id="quizResultClearPriceBtn" class="quiz-price-clear-sm hidden">Any Price</button>
+        </div>
+        <div class="quiz-res-sort-group">
+          <button type="button" class="quiz-sort-pill active" data-rec-sort="match">Best Match</button>
+          <button type="button" class="quiz-sort-pill" data-rec-sort="asc">↑ Price</button>
+          <button type="button" class="quiz-sort-pill" data-rec-sort="desc">↓ Price</button>
+        </div>
+      </div>
+
       <div id="recommendationContainer" class="quiz-rec-grid"></div>
     </div>
 

@@ -2819,3 +2819,337 @@
       text-align: center;
       user-select: none;
     }
+
+    /* ══════════════════════════════════════════════════════════════
+       PRODUCTS MENU PRICE SORT & CUSTOM PRICE RANGE CONTROLS
+       ══════════════════════════════════════════════════════════════ */
+    .menu-price-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px 14px;
+      background: white;
+      border: 1.5px solid #ddd9ee;
+      border-radius: 16px;
+      padding: 8px 14px;
+      margin-bottom: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+    }
+    .price-sort-group,
+    .price-range-group {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .price-ctrl-label {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-right: 2px;
+      white-space: nowrap;
+    }
+    .price-sort-pill {
+      border: 1.5px solid #ddd9ee;
+      background: #FAF8FC;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 12px;
+      min-height: 34px;
+      border-radius: 50px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      white-space: nowrap;
+    }
+    .price-sort-pill:hover {
+      border-color: var(--primary-light);
+      background: var(--primary-bg);
+    }
+    .price-sort-pill.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+      box-shadow: 0 3px 10px rgba(137, 87, 204, 0.25);
+    }
+    .price-input-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .currency-prefix {
+      position: absolute;
+      left: 9px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--primary);
+      pointer-events: none;
+    }
+    .price-range-input {
+      width: 78px;
+      height: 34px;
+      padding: 4px 8px 4px 22px;
+      border-radius: 10px;
+      border: 1.5px solid #ddd9ee;
+      background: #FAF8FC;
+      font-family: var(--sans);
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text);
+      outline: none;
+      transition: all 0.18s ease;
+      -moz-appearance: textfield;
+    }
+    .price-range-input::-webkit-outer-spin-button,
+    .price-range-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .price-range-input:focus {
+      border-color: var(--primary);
+      background: white;
+      box-shadow: 0 0 0 3px rgba(137, 87, 204, 0.14);
+    }
+    .price-range-sep {
+      font-weight: 700;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .price-reset-btn {
+      background: #FDEDED;
+      color: #E53935;
+      border: 1px solid #FADBD8;
+      border-radius: 50px;
+      padding: 5px 11px;
+      height: 32px;
+      font-family: var(--sans);
+      font-size: 11.5px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .price-reset-btn:hover {
+      background: #FADBD8;
+    }
+    .price-empty-reset-btn {
+      margin-top: 12px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 50px;
+      padding: 10px 20px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(137, 87, 204, 0.25);
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+    .price-empty-reset-btn:hover {
+      background: var(--primary-dark);
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+       VIRTUAL BARISTA QUIZ CUSTOM PRICE RANGE & RESULTS FILTER BAR
+       ══════════════════════════════════════════════════════════════ */
+    .quiz-custom-price-box {
+      margin-top: 14px;
+      background: rgba(255, 255, 255, 0.16);
+      border: 1.5px solid rgba(255, 255, 255, 0.35);
+      border-radius: 18px;
+      padding: 14px 16px;
+      backdrop-filter: blur(6px);
+      position: relative;
+      z-index: 2;
+    }
+    .quiz-custom-price-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.92);
+      margin-bottom: 10px;
+    }
+    .quiz-custom-price-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .quiz-custom-input-wrap {
+      position: relative;
+      flex: 1;
+      min-width: 105px;
+      display: flex;
+      align-items: center;
+    }
+    .quiz-custom-input-wrap .currency-prefix {
+      color: var(--primary-dark);
+      left: 12px;
+      font-size: 13px;
+    }
+    .quiz-custom-input {
+      width: 100%;
+      height: 42px;
+      padding: 6px 12px 6px 28px;
+      border-radius: 12px;
+      border: 1.5px solid rgba(255, 255, 255, 0.6);
+      background: rgba(255, 255, 255, 0.95);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 13.5px;
+      font-weight: 700;
+      outline: none;
+      -moz-appearance: textfield;
+    }
+    .quiz-custom-input::-webkit-outer-spin-button,
+    .quiz-custom-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .quiz-custom-input:focus {
+      border-color: white;
+      background: white;
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
+    }
+    .quiz-custom-apply-btn {
+      background: white;
+      color: var(--primary-dark);
+      border: none;
+      border-radius: 12px;
+      height: 42px;
+      padding: 0 18px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      transition: transform 0.15s ease, background 0.15s ease;
+      white-space: nowrap;
+    }
+    .quiz-custom-apply-btn:hover {
+      background: #f5f0ff;
+      transform: translateY(-1px);
+    }
+
+    .quiz-results-price-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px 12px;
+      background: white;
+      border: 1px solid #ddd9ee;
+      border-radius: 14px;
+      padding: 10px 12px;
+      margin-bottom: 14px;
+      box-shadow: 0 2px 8px rgba(30, 27, 46, 0.04);
+    }
+    .quiz-res-range-group,
+    .quiz-res-sort-group {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .quiz-res-label {
+      font-size: 11.5px;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .quiz-price-apply-sm {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      height: 32px;
+      padding: 0 12px;
+      font-family: var(--sans);
+      font-size: 11.5px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .quiz-price-apply-sm:hover {
+      background: var(--primary-dark);
+    }
+    .quiz-price-clear-sm {
+      background: #FDEDED;
+      color: #E53935;
+      border: 1px solid #FADBD8;
+      border-radius: 10px;
+      height: 32px;
+      padding: 0 10px;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .quiz-sort-pill {
+      background: #FAF8FC;
+      border: 1px solid #ddd9ee;
+      color: var(--text);
+      border-radius: 50px;
+      padding: 5px 10px;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .quiz-sort-pill.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    @media (max-width: 640px) {
+      .menu-price-controls {
+        padding: 8px 10px;
+        gap: 6px 10px;
+      }
+      .price-range-input {
+        width: 68px;
+      }
+    }
+
+    /* ══════════════════════════════
+       PAYMONGO TEST MODE BADGES & PANELS
+    ══════════════════════════════ */
+    .test-mode-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #FEF3C7;
+      color: #92400E;
+      border: 1px solid #FCD34D;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .test-dot {
+      width: 7px;
+      height: 7px;
+      background: #D97706;
+      border-radius: 50%;
+      display: inline-block;
+      animation: pulseDot 1.5s infinite;
+    }
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }

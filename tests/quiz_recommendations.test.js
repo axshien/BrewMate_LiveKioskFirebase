@@ -171,7 +171,34 @@ function runTests() {
   const latteScoreVal = calculateQuizMatchScore(latteItem, latteAnswers);
   const americanoScoreVal = calculateQuizMatchScore(americanoItem, latteAnswers);
   assert(latteScoreVal > americanoScoreVal, 'Coffee-based milk drink must outrank black americano for milk latte craving');
-  console.log(`✓ PASS: Latte score (${latteScoreVal}) > Americano score (${americanoScoreVal}).`);
+  // Test 15: Custom price range filtering in Virtual Barista Quiz
+  console.log('\nTest 15: Custom price range filtering in recommendations...');
+  const budgetDrink = { ...sampleProducts.find(x => x.productId === 177), price: 85, minPrice: 85, maxPrice: 85 };
+  const priceyDrink = { ...sampleProducts.find(x => x.productId === 215), price: 165, minPrice: 165, maxPrice: 165 };
+  const customRangeAnswers = { type: 'drink', tempOrCategory: 'cold', baseOrFlavor: 'any', tasteOrStyle: 'sweet', minPrice: 70, maxPrice: 120 };
+  const budgetScore = calculateQuizMatchScore(budgetDrink, customRangeAnswers);
+  const priceyScore = calculateQuizMatchScore(priceyDrink, customRangeAnswers);
+  assert(budgetScore > 0, 'Drink within custom price range (₱85 in ₱70–₱120) must score positively');
+  assert.strictEqual(priceyScore, -999, 'Drink outside custom price range (₱165 > ₱120) must be rejected (-999)');
+  console.log(`✓ PASS: Custom price range (₱70–₱120) accepted ₱85 item (score ${budgetScore}) and rejected ₱165 item (${priceyScore}).`);
+
+  // Test 16: Multi-size item custom price range matching in Virtual Barista Quiz
+  console.log('\nTest 16: Multi-size drink custom price range matching...');
+  const sizedDrink = {
+    ...sampleProducts.find(x => x.productId === 221),
+    hasSizes: true,
+    minPrice: 90,
+    maxPrice: 115,
+    sizes: [
+      { sizeId: 1, sizeName: '16oz', price: 90 },
+      { sizeId: 2, sizeName: '22oz', price: 115 }
+    ]
+  };
+  const match22ozRange = calculateQuizMatchScore(sizedDrink, { type: 'drink', tempOrCategory: 'cold', baseOrFlavor: 'tea', tasteOrStyle: 'fruity', minPrice: 110, maxPrice: 130 });
+  const outOfRange = calculateQuizMatchScore(sizedDrink, { type: 'drink', tempOrCategory: 'cold', baseOrFlavor: 'tea', tasteOrStyle: 'fruity', minPrice: 140, maxPrice: 200 });
+  assert(match22ozRange > 0, 'Multi-size drink with 22oz at ₱115 must match ₱110–₱130 custom range');
+  assert.strictEqual(outOfRange, -999, 'Multi-size drink (₱90/₱115) must be rejected for ₱140–₱200 range');
+  console.log('✓ PASS: Multi-size drink accurately evaluated against custom price ranges.');
 
   console.log('\n═══════════════════════════════════════════════════════════════════');
   console.log('ALL QUIZ RECOMMENDATION TESTS PASSED SUCCESSFULLY!');

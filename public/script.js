@@ -1377,6 +1377,94 @@ async function loadTopSellingProduct() {
   renderTopSellingProducts();
 }
 
+// ─── MENU PRICE SORT & CUSTOM PRICE RANGE STATE ──────────────────────────────
+let MENU_PRICE_SORT = 'default'; // 'default' | 'asc' | 'desc'
+let MENU_MIN_PRICE = null;       // number or null
+let MENU_MAX_PRICE = null;       // number or null
+
+// Get effective price of an item for sorting (takes active promo and starting size price into account)
+function getItemEffectiveSortPrice(item) {
+  if (!item) return 0;
+  const hasItemSizes = (item.hasSizes || (item.sizes && item.sizes.length > 0)) && item.sizes && item.sizes.length > 0;
+  if (hasItemSizes) {
+    if (item.promo && item.promoMinPrice !== null && item.promoMinPrice !== undefined) {
+      return Number(item.promoMinPrice);
+    }
+    if (item.minPrice !== null && item.minPrice !== undefined) {
+      return Number(item.minPrice);
+    }
+    const prices = item.sizes.map(s => {
+      const p = Number(s.price) || 0;
+      return item.promo ? applyPromo(p, item.promo) : p;
+    });
+    return Math.min(...prices);
+  }
+  const baseP = Number(item.price !== null && item.price !== undefined ? item.price : (item.minPrice || 0));
+  return (item.promo && item.promoPrice !== null && item.promoPrice !== undefined) ? Number(item.promoPrice) : baseP;
+}
+
+// Check if an item's effective price (or any of its size options) falls within [minPriceFilter, maxPriceFilter]
+function isItemInPriceRange(item, minPriceFilter, maxPriceFilter) {
+  if (!item) return false;
+  const hasMin = minPriceFilter !== null && minPriceFilter !== undefined && String(minPriceFilter).trim() !== '' && !isNaN(Number(minPriceFilter));
+  const hasMax = maxPriceFilter !== null && maxPriceFilter !== undefined && String(maxPriceFilter).trim() !== '' && !isNaN(Number(maxPriceFilter));
+  if (!hasMin && !hasMax) return true;
+
+  let minVal = hasMin ? Number(minPriceFilter) : 0;
+  let maxVal = hasMax ? Number(maxPriceFilter) : Infinity;
+  if (hasMin && hasMax && minVal > maxVal) {
+    const temp = minVal;
+    minVal = maxVal;
+    maxVal = temp;
+  }
+
+  const hasItemSizes = (item.hasSizes || (item.sizes && item.sizes.length > 0)) && item.sizes && item.sizes.length > 0;
+  if (hasItemSizes) {
+    return item.sizes.some(s => {
+      const rawP = Number(s.price) || 0;
+      const effP = item.promo ? applyPromo(rawP, item.promo) : rawP;
+      return effP >= minVal && effP <= maxVal;
+    });
+  }
+
+  const hasDirectOrMin = (item.price !== undefined && item.price !== null && item.price !== '') ||
+                         (item.minPrice !== undefined && item.minPrice !== null && item.minPrice !== '');
+  if (!hasDirectOrMin) return true;
+
+  const rawPrice = (item.price !== undefined && item.price !== null && item.price !== '')
+    ? Number(item.price)
+    : Number(item.minPrice);
+  if (isNaN(rawPrice)) return true;
+
+  const effPrice = (item.promo && item.promoPrice !== null && item.promoPrice !== undefined)
+    ? Number(item.promoPrice)
+    : (item.promo ? applyPromo(rawPrice, item.promo) : rawPrice);
+
+  return effPrice >= minVal && effPrice <= maxVal;
+}
+
+// Sort an array of product items by price ('default', 'asc', 'desc')
+function sortItemsByPrice(items, sortOrder = 'default') {
+  if (!Array.isArray(items)) return [];
+  const copy = items.slice();
+  if (sortOrder === 'asc') {
+    copy.sort((a, b) => {
+      const pa = getItemEffectiveSortPrice(a);
+      const pb = getItemEffectiveSortPrice(b);
+      if (pa !== pb) return pa - pb;
+      return String(a.productName || a.name || '').localeCompare(String(b.productName || b.name || ''));
+    });
+  } else if (sortOrder === 'desc') {
+    copy.sort((a, b) => {
+      const pa = getItemEffectiveSortPrice(a);
+      const pb = getItemEffectiveSortPrice(b);
+      if (pb !== pa) return pb - pa;
+      return String(a.productName || a.name || '').localeCompare(String(b.productName || b.name || ''));
+    });
+  }
+  return copy;
+}
+
 function renderTopSellingProducts() {
   const container = document.getElementById('topSellingGrid');
   const header = document.getElementById('featuredHeader');
@@ -1384,7 +1472,12 @@ function renderTopSellingProducts() {
 
   container.innerHTML = '';
 
-  if (!TOP_SELLING_PRODUCTS || TOP_SELLING_PRODUCTS.length === 0) {
+  const filteredTop = (TOP_SELLING_PRODUCTS || []).filter(p =>
+    isItemInPriceRange(p, MENU_MIN_PRICE, MENU_MAX_PRICE)
+  );
+  const sortedTop = sortItemsByPrice(filteredTop, MENU_PRICE_SORT);
+
+  if (sortedTop.length === 0) {
     if (header) header.style.display = 'none';
     container.style.display = 'none';
     return;
@@ -1393,7 +1486,7 @@ function renderTopSellingProducts() {
   if (header) header.style.display = '';
   container.style.display = 'grid';
 
-  TOP_SELLING_PRODUCTS.forEach(product => {
+  sortedTop.forEach(product => {
     // Render using makeCard with star badge
     const card = makeCard(product);
     container.appendChild(card);
@@ -1652,6 +1745,13 @@ function buildGrids() {
     if (grid.id !== 'searchResultsGrid') grid.innerHTML = '';
   });
 
+  // Render Top Selling with current price filter & sort order
+  renderTopSellingProducts();
+
+  // Group items by categoryId while applying custom price range filter
+  const itemsByCategory = new Map();
+  let totalMatchingItems = 0;
+
   ALL_ITEMS.forEach(item => {
     const catId = Number(item.categoryId);
     if (isAddonsCategory(item.categoryName, catId)) return;
@@ -1659,9 +1759,23 @@ function buildGrids() {
     item.catKey = `cat-${catId}`;
     item.cat = mapCategoryToSlug(catId, item.categoryName || CATEGORY_LOOKUP[catId] || '');
 
+    if (!isItemInPriceRange(item, MENU_MIN_PRICE, MENU_MAX_PRICE)) return;
+
+    if (!itemsByCategory.has(catId)) {
+      itemsByCategory.set(catId, []);
+    }
+    itemsByCategory.get(catId).push(item);
+    totalMatchingItems++;
+  });
+
+  // Sort each category's items by MENU_PRICE_SORT ('default' | 'asc' | 'desc') and append cards
+  itemsByCategory.forEach((catItems, catId) => {
     const grid = document.getElementById(`cat-grid-${catId}`);
     if (grid) {
-      grid.appendChild(makeCard(item));
+      const sortedCatItems = sortItemsByPrice(catItems, MENU_PRICE_SORT);
+      sortedCatItems.forEach(item => {
+        grid.appendChild(makeCard(item));
+      });
     }
   });
 
@@ -1674,6 +1788,24 @@ function buildGrids() {
     if (sec) sec.style.display = hasProducts ? '' : 'none';
     if (grid) grid.style.display = hasProducts ? '' : 'none';
   });
+
+  // Show/hide empty state when price filter matches 0 items
+  const emptyStateEl = document.getElementById('menuPriceEmptyState');
+  const emptyTextEl = document.getElementById('menuPriceEmptyText');
+  const searchInput = document.getElementById('menuSearch');
+  const isSearching = searchInput && searchInput.value.trim().length > 0;
+  if (emptyStateEl) {
+    if (!isSearching && ALL_ITEMS.length > 0 && totalMatchingItems === 0) {
+      const minLbl = MENU_MIN_PRICE !== null ? `₱${MENU_MIN_PRICE}` : '₱0';
+      const maxLbl = MENU_MAX_PRICE !== null ? `₱${MENU_MAX_PRICE}` : 'Any';
+      if (emptyTextEl) {
+        emptyTextEl.textContent = `No products found within ${minLbl} – ${maxLbl}.`;
+      }
+      emptyStateEl.classList.remove('hidden');
+    } else {
+      emptyStateEl.classList.add('hidden');
+    }
+  }
 }
 
 let cur = 'welcomeScreen';
@@ -1961,10 +2093,13 @@ document.querySelectorAll('input[name="payment"]').forEach(radio => {
     currentPaymentMethod = e.target.value;
     const panelCash = document.getElementById('panel-cash');
     const panelDigital = document.getElementById('panel-digital');
+    const panelPaymongo = document.getElementById('panel-paymongo');
     if (panelCash) panelCash.classList.add('hidden');
     if (panelDigital) panelDigital.classList.add('hidden');
+    if (panelPaymongo) panelPaymongo.classList.add('hidden');
     if (currentPaymentMethod === 'Cash' && panelCash) panelCash.classList.remove('hidden');
-    else if (panelDigital) panelDigital.classList.remove('hidden');
+    else if (currentPaymentMethod === 'E-Wallets' && panelDigital) panelDigital.classList.remove('hidden');
+    else if (currentPaymentMethod.includes('PayMongo') && panelPaymongo) panelPaymongo.classList.remove('hidden');
   });
 });
 
@@ -2008,117 +2143,248 @@ function getUniqueRandomOrderNumber() {
   return fallback;
 }
 
-// ═════════════════════════════════════════
-// 5. PLACE ORDER & SYNC TO CHILL_KIOSK_QUEUE (FAST)
-// ═════════════════════════════════════════
-async function placeOrder() {
-  if (!IS_KIOSK_OPEN) {
-    applyKioskOpenState(false);
+// ═════════════════════════════════════════════════════════════════════════════
+// 4.9 PAYMONGO TEST MODE CHECKOUT & PAYMENT VERIFICATION
+// ═════════════════════════════════════════════════════════════════════════════
+
+const PAYMONGO_CONFIG = {
+  // Edge Function endpoints (with fallback to common naming schemes)
+  CHECKOUT_ENDPOINTS: [
+    `${SUPABASE_URL}/functions/v1/create-paymongo-checkout`,
+    `${SUPABASE_URL}/functions/v1/paymongo-checkout`,
+    `${SUPABASE_URL}/functions/v1/paymongo`
+  ],
+  POLL_INTERVAL_MS: 3000,
+  MAX_POLL_ATTEMPTS: 20
+};
+
+async function callPayMongoCheckoutFunction(payload) {
+  let lastError = null;
+  for (const ep of PAYMONGO_CONFIG.CHECKOUT_ENDPOINTS) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+      const resp = await fetch(ep, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (resp.ok) {
+        const body = await resp.json();
+        const url = body.checkoutUrl || body.checkout_url || body.data?.attributes?.checkout_url || body.url;
+        if (url) {
+          return {
+            success: true,
+            checkoutUrl: url,
+            sessionId: body.sessionId || body.data?.id || null
+          };
+        }
+        lastError = 'Checkout URL missing from response.';
+      } else {
+        const errJson = await resp.json().catch(() => ({}));
+        lastError = errJson.message || errJson.error || `HTTP ${resp.status}`;
+      }
+    } catch (e) {
+      lastError = e.name === 'AbortError' ? 'Checkout request timed out.' : (e.message || 'Network connection failed.');
+    }
+  }
+
+  return { success: false, error: lastError };
+}
+
+async function handlePayMongoReturn() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const paymentStatus = urlParams.get('payment_status') || urlParams.get('status');
+  const orderNumber = urlParams.get('orderNumber') || urlParams.get('order_number');
+  const queueId = urlParams.get('queueId') || urlParams.get('queue_id');
+
+  if (!paymentStatus && !orderNumber) return;
+
+  // Clean the URL query string immediately to prevent reload loops and avoid exposing parameters
+  try {
+    const cleanUrl = window.location.origin + window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+  } catch (e) {}
+
+  // 1. If customer cancelled checkout on PayMongo
+  if (paymentStatus === 'cancelled' || paymentStatus === 'cancel') {
+    showToast('PayMongo checkout was cancelled. Your cart has been retained.', 'info');
+    goTo('cartScreen');
     return;
   }
-  if (!cart.length) return;
-  const nicknameInput = document.getElementById('customerNickname').value.trim();
-  if (!nicknameInput || nicknameInput.length < 1) {
-    showToast('Please enter a nickname for your cup', 'warning');
-    return;
-  }
-  const safeNickname = nicknameInput.slice(0, 30).toUpperCase();
 
-  const emailInput = document.getElementById('customerEmail')?.value.trim() || '';
-  const notesInput = document.getElementById('orderNotes')?.value.trim() || '';
-  const total = cart.reduce((s,i) => s + i.price * i.qty, 0);
-  const count = cart.reduce((s,i) => s + i.qty, 0);
+  // 2. If returning to verify payment
+  if (paymentStatus === 'check' || paymentStatus === 'success' || paymentStatus === 'paid') {
+    const overlay = document.getElementById('paymongoVerificationOverlay');
+    const titleEl = document.getElementById('paymongoVerifyTitle');
+    const msgEl = document.getElementById('paymongoVerifyMsg');
+    const statusEl = document.getElementById('paymongoVerifyStatus');
+    const cancelBtn = document.getElementById('cancelPaymongoWaitingBtn');
 
-  // 1. Instant unique random order number (0ms!)
-  const orderNumber = getUniqueRandomOrderNumber();
+    if (overlay) overlay.classList.remove('hidden');
+    if (cancelBtn) {
+      cancelBtn.classList.add('hidden');
+      cancelBtn.onclick = () => {
+        if (overlay) overlay.classList.add('hidden');
+        goTo('cartScreen');
+      };
+      // Reveal return button after 8 seconds of waiting
+      setTimeout(() => {
+        if (cancelBtn) cancelBtn.classList.remove('hidden');
+      }, 8000);
+    }
 
-  // 2. Prepare payload including special instructions
-  const kioskPayload = {
-    kioskordernumber: String(orderNumber),
-    customerName: safeNickname,
-    customerEmail: emailInput || null,
-    orderType: currentOrderType,
-    special_instructions: notesInput || null,
-    notes: notesInput || null,
-    instructions: notesInput || null,
-    items: cart.map(item => ({
-      name: item.name,
-      displayName: item.displayName || item.name,
-      flavor: item.flavor || null,
-      flavorName: item.flavorName || (item.flavor ? item.flavor.flavorName : null),
-      initialPrice: item.initialPrice != null ? Number(item.initialPrice) : Number(item.price),
-      addons: item.addons || [],
-      addonTotal: item.addonTotal || 0,
-      price: item.price,
-      qty: item.qty,
-      imageUrl: item.imageUrl || '',
-      desc: item.desc || '',
-      subtotal: item.price * item.qty,
-      special_instructions: notesInput || null,
-      notes: notesInput || null
-    })),
-    subtotal: Number(total),
-    totalamount: Number(total),
-    paymentmethod: currentPaymentMethod || 'Cash',
-    status: 'pending'
-  };
+    let savedOrderInfo = null;
+    try {
+      const raw = sessionStorage.getItem('chill_pending_paymongo');
+      if (raw) savedOrderInfo = JSON.parse(raw);
+    } catch (e) {}
 
-  // 3. 3-Second Loading Screen while completing order
-  const placeBtn = document.getElementById('placeOrderBtn');
-  if (placeBtn) placeBtn.disabled = true;
-
-  const loadingOverlay = document.getElementById('orderLoadingOverlay');
-  const progressBar = document.getElementById('orderLoadingProgressBar');
-  if (progressBar) progressBar.classList.remove('active');
-  if (loadingOverlay) loadingOverlay.classList.remove('hidden');
-
-  // Trigger progress bar transition
-  if (progressBar) {
-    void progressBar.offsetWidth;
-    progressBar.classList.add('active');
-  }
-
-  // Minimum 3-second display promise
-  const minWaitPromise = new Promise(resolve => setTimeout(resolve, 3000));
-  const submitPromise = CustomerSessionManager.submitOrder(kioskPayload);
-
-  const [orderResult] = await Promise.all([submitPromise, minWaitPromise]);
-
-  if (loadingOverlay) loadingOverlay.classList.add('hidden');
-  if (progressBar) progressBar.classList.remove('active');
-
-  if (!orderResult.success) {
-    if (placeBtn) placeBtn.disabled = false;
-    if (orderResult.code === 'SESSION_EXPIRED') {
-      CustomerSessionManager.handleSessionExpired('Session expired during checkout');
+    const targetOrderNum = orderNumber || savedOrderInfo?.orderNumber;
+    if (!targetOrderNum) {
+      if (overlay) overlay.classList.add('hidden');
+      showToast('Order reference not found for payment verification.', 'error');
+      goTo('cartScreen');
       return;
     }
-    if (orderResult.code === 'KIOSK_CLOSED') {
-      applyKioskOpenState(false);
-      return;
+
+    let attempts = 0;
+    const maxAttempts = PAYMONGO_CONFIG.MAX_POLL_ATTEMPTS;
+    let isVerified = false;
+
+    // Realtime subscription to chill_kiosk_queue
+    let realtimeChannel = null;
+    if (db && typeof db.channel === 'function') {
+      try {
+        realtimeChannel = db.channel(`kiosk_pay_verify_${targetOrderNum}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'chill_kiosk_queue',
+              filter: `kioskordernumber=eq.${targetOrderNum}`
+            },
+            payload => {
+              const rec = payload.new;
+              if (rec && ((rec.payment_status && rec.payment_status.toUpperCase() === 'PAID') || (rec.status && rec.status.toLowerCase() === 'paid'))) {
+                onPaymentVerified(rec);
+              }
+            }
+          )
+          .subscribe();
+      } catch (e) {}
     }
-    showToast(orderResult.message || 'Failed to submit order. Please try again.', 'error');
-    return;
+
+    async function checkPaymentStatus() {
+      if (isVerified) return;
+      attempts++;
+      if (statusEl) statusEl.textContent = `Verifying payment with ChillVentory server (${attempts}/${maxAttempts})...`;
+
+      try {
+        if (db) {
+          const { data, error } = await db
+            .from('chill_kiosk_queue')
+            .select('*')
+            .eq('kioskordernumber', targetOrderNum)
+            .maybeSingle();
+
+          if (data && !error) {
+            const pStatus = (data.payment_status || '').toUpperCase();
+            const ordStatus = (data.status || '').toLowerCase();
+
+            // Authoritative server-verified status check only
+            if (pStatus === 'PAID' || ordStatus === 'paid') {
+              onPaymentVerified(data);
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Authoritative payment verification query:', e);
+      }
+
+      if (attempts < maxAttempts && !isVerified) {
+        setTimeout(checkPaymentStatus, PAYMONGO_CONFIG.POLL_INTERVAL_MS);
+      } else if (!isVerified) {
+        if (titleEl) titleEl.textContent = 'Verification Pending';
+        if (msgEl) msgEl.textContent = 'Payment confirmation is still processing from the payment provider.';
+        if (statusEl) statusEl.textContent = 'Your order is pending in the queue. Show your payment reference to the cashier.';
+        if (cancelBtn) {
+          cancelBtn.classList.remove('hidden');
+          cancelBtn.textContent = 'Proceed to Kiosk Menu';
+          cancelBtn.onclick = () => {
+            if (overlay) overlay.classList.add('hidden');
+            goTo('menuScreen');
+          };
+        }
+        if (realtimeChannel && db && typeof db.removeChannel === 'function') {
+          try { db.removeChannel(realtimeChannel); } catch (e) {}
+        }
+      }
+    }
+
+    function onPaymentVerified(orderData) {
+      if (isVerified) return;
+      isVerified = true;
+      if (realtimeChannel && db && typeof db.removeChannel === 'function') {
+        try { db.removeChannel(realtimeChannel); } catch (e) {}
+      }
+
+      try { sessionStorage.removeItem('chill_pending_paymongo'); } catch (e) {}
+      cart = [];
+      syncUI();
+      updateCartInputsState();
+
+      if (overlay) overlay.classList.add('hidden');
+
+      const num = orderData.kioskordernumber || targetOrderNum;
+      const totalAmt = Number(orderData.totalamount || savedOrderInfo?.total || 0);
+      const nickname = orderData.customerName || savedOrderInfo?.nickname || 'Guest';
+      const countItems = orderData.items ? (Array.isArray(orderData.items) ? orderData.items.length : 1) : (savedOrderInfo?.count || 1);
+      const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
+      const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const invoiceString = `#INV-${num}`;
+
+      renderConfirmedOrderTicket(
+        num,
+        nickname,
+        invoiceString,
+        dateStr,
+        timeStr,
+        totalAmt,
+        countItems,
+        savedOrderInfo?.notes || null,
+        orderData.customerEmail || savedOrderInfo?.email || null,
+        true // isPayMongoVerified
+      );
+    }
+
+    checkPaymentStatus();
   }
+}
 
-  const now = new Date();
-  const invoiceString = `#INV-${orderNumber}`;
-  const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
-  const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  const finalNickname = safeNickname;
-
+function renderConfirmedOrderTicket(orderNumber, safeNickname, invoiceString, dateStr, timeStr, total, count, notesInput, emailInput, isPayMongoVerified = false) {
   // Populate Order Details
   document.getElementById('queueNum').textContent = orderNumber;
   document.getElementById('confirmInvoice').textContent = invoiceString;
   document.getElementById('confirmDate').textContent = dateStr;
   document.getElementById('confirmTime').textContent = timeStr;
-  document.getElementById('confirmNickname').textContent = finalNickname;
+  document.getElementById('confirmNickname').textContent = safeNickname;
   document.getElementById('confirmItems').textContent = count + ' item' + (count !== 1 ? 's' : '');
   document.getElementById('confirmOrderType').textContent = currentOrderType;
   document.getElementById('confirmAmount').textContent = '₱' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
   // Automatically render digital receipt so it's ready when user clicks "View Digital Receipt"
-  generateDigitalReceipt(finalNickname, invoiceString, dateStr, timeStr, total, count, 0, total, notesInput);
+  generateDigitalReceipt(safeNickname, invoiceString, dateStr, timeStr, total, count, 0, total, notesInput);
 
   const confirmEmailRow = document.getElementById('confirmEmailRow');
   const confirmEmailEl = document.getElementById('confirmEmail');
@@ -2127,11 +2393,20 @@ async function placeOrder() {
     if (emailInput) {
       confirmEmailRow.style.display = 'flex';
       confirmEmailEl.textContent = emailInput;
-      if (confirmStatusText) confirmStatusText.textContent = '✓ Sent to POS & Email';
+      if (confirmStatusText) {
+        confirmStatusText.textContent = isPayMongoVerified ? '✓ PAID & Sent to POS & Email' : '✓ Sent to POS & Email';
+      }
     } else {
       confirmEmailRow.style.display = 'none';
-      if (confirmStatusText) confirmStatusText.textContent = '✓ Sent to POS';
+      if (confirmStatusText) {
+        confirmStatusText.textContent = isPayMongoVerified ? '✓ PAID & Sent to POS' : '✓ Sent to POS';
+      }
     }
+  }
+  if (isPayMongoVerified && confirmStatusText) {
+    confirmStatusText.style.color = '#10B981';
+  } else if (confirmStatusText) {
+    confirmStatusText.style.color = '';
   }
 
   const confirmNotesRow = document.getElementById('confirmNotesRow');
@@ -2218,7 +2493,7 @@ async function placeOrder() {
       toast: true,
       position: 'top',
       icon: 'success',
-      title: `Order #${orderNumber} Confirmed!`,
+      title: isPayMongoVerified ? `Order #${orderNumber} Paid!` : `Order #${orderNumber} Confirmed!`,
       showConfirmButton: false,
       timer: 2000,
       background: '#1E1B2E',
@@ -2226,6 +2501,171 @@ async function placeOrder() {
       iconColor: '#5DBF6A',
       customClass: { popup: 'swal2-kiosk-toast' }
     });
+  }
+}
+
+// ═════════════════════════════════════════
+// 5. PLACE ORDER & SYNC TO CHILL_KIOSK_QUEUE (FAST)
+// ═════════════════════════════════════════
+async function placeOrder() {
+  if (!IS_KIOSK_OPEN) {
+    applyKioskOpenState(false);
+    return;
+  }
+  if (!cart.length) return;
+  const nicknameInput = document.getElementById('customerNickname').value.trim();
+  if (!nicknameInput || nicknameInput.length < 1) {
+    showToast('Please enter a nickname for your cup', 'warning');
+    return;
+  }
+  const safeNickname = nicknameInput.slice(0, 30).toUpperCase();
+
+  const emailInput = document.getElementById('customerEmail')?.value.trim() || '';
+  const notesInput = document.getElementById('orderNotes')?.value.trim() || '';
+  const total = cart.reduce((s,i) => s + i.price * i.qty, 0);
+  const count = cart.reduce((s,i) => s + i.qty, 0);
+
+  // 1. Instant unique random order number (0ms!)
+  const orderNumber = getUniqueRandomOrderNumber();
+
+  // 2. Prepare payload including special instructions
+  const kioskPayload = {
+    kioskordernumber: String(orderNumber),
+    customerName: safeNickname,
+    customerEmail: emailInput || null,
+    orderType: currentOrderType,
+    special_instructions: notesInput || null,
+    notes: notesInput || null,
+    instructions: notesInput || null,
+    items: cart.map(item => ({
+      name: item.name,
+      displayName: item.displayName || item.name,
+      flavor: item.flavor || null,
+      flavorName: item.flavorName || (item.flavor ? item.flavor.flavorName : null),
+      initialPrice: item.initialPrice != null ? Number(item.initialPrice) : Number(item.price),
+      addons: item.addons || [],
+      addonTotal: item.addonTotal || 0,
+      price: item.price,
+      qty: item.qty,
+      imageUrl: item.imageUrl || '',
+      desc: item.desc || '',
+      subtotal: item.price * item.qty,
+      special_instructions: notesInput || null,
+      notes: notesInput || null
+    })),
+    subtotal: Number(total),
+    totalamount: Number(total),
+    paymentmethod: currentPaymentMethod || 'Cash',
+    status: 'pending'
+  };
+
+  // 3. 3-Second Loading Screen while completing order
+  const placeBtn = document.getElementById('placeOrderBtn');
+  if (placeBtn) placeBtn.disabled = true;
+
+  const loadingOverlay = document.getElementById('orderLoadingOverlay');
+  const progressBar = document.getElementById('orderLoadingProgressBar');
+  if (progressBar) progressBar.classList.remove('active');
+  if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+
+  // Trigger progress bar transition
+  if (progressBar) {
+    void progressBar.offsetWidth;
+    progressBar.classList.add('active');
+  }
+
+  let isRedirecting = false;
+
+  try {
+    // Minimum 3-second display promise
+    const minWaitPromise = new Promise(resolve => setTimeout(resolve, 3000));
+    const submitPromise = CustomerSessionManager.submitOrder(kioskPayload);
+
+    const [orderResult] = await Promise.all([submitPromise, minWaitPromise]);
+
+    if (!orderResult || !orderResult.success) {
+      if (placeBtn) placeBtn.disabled = false;
+      if (orderResult && orderResult.code === 'SESSION_EXPIRED') {
+        CustomerSessionManager.handleSessionExpired('Session expired during checkout');
+        return;
+      }
+      if (orderResult && orderResult.code === 'KIOSK_CLOSED') {
+        applyKioskOpenState(false);
+        return;
+      }
+      showToast(orderResult?.message || 'Failed to submit order. Please try again.', 'error');
+      return;
+    }
+
+    const now = new Date();
+    const invoiceString = `#INV-${orderNumber}`;
+    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
+    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const finalNickname = safeNickname;
+
+    // 4. If PayMongo Cashless Payment selected: attempt hosted checkout session redirect
+    if (currentPaymentMethod && currentPaymentMethod.includes('PayMongo')) {
+      const loadingStatusText = document.querySelector('#orderLoadingOverlay .order-loading-status');
+      const loadingTitleText = document.querySelector('#orderLoadingOverlay .order-loading-title');
+      if (loadingTitleText) loadingTitleText.textContent = 'Preparing PayMongo Checkout...';
+      if (loadingStatusText) loadingStatusText.textContent = 'Connecting to PayMongo Checkout...';
+
+      const returnOrigin = window.location.origin + window.location.pathname;
+      const checkoutPayload = {
+        orderId: orderResult.order?.kioskqueueid || null,
+        kioskordernumber: String(orderNumber),
+        customerName: safeNickname,
+        customerEmail: emailInput || null,
+        items: kioskPayload.items,
+        totalAmount: Number(total),
+        successUrl: `${returnOrigin}?payment_status=check&orderNumber=${orderNumber}&queueId=${orderResult.order?.kioskqueueid || ''}`,
+        cancelUrl: `${returnOrigin}?payment_status=cancelled&orderNumber=${orderNumber}`
+      };
+
+      const checkoutResult = await callPayMongoCheckoutFunction(checkoutPayload);
+
+      if (checkoutResult && checkoutResult.success && checkoutResult.checkoutUrl) {
+        isRedirecting = true;
+        try {
+          sessionStorage.setItem('chill_pending_paymongo', JSON.stringify({
+            orderNumber: String(orderNumber),
+            queueId: orderResult.order?.kioskqueueid || null,
+            total: Number(total),
+            count: count,
+            nickname: safeNickname,
+            email: emailInput,
+            notes: notesInput,
+            orderType: currentOrderType,
+            items: kioskPayload.items
+          }));
+        } catch (e) {}
+
+        // Redirect customer to PayMongo Hosted Checkout
+        window.location.href = checkoutResult.checkoutUrl;
+        return;
+      }
+
+      // If online checkout session endpoint is unreachable or times out,
+      // the order was ALREADY safely recorded in chill_kiosk_queue.
+      // Gracefully fall through to show confirmed order ticket and allow payment at counter/QR.
+      console.warn('PayMongo online checkout unavailable; order recorded in queue for counter/QR payment:', checkoutResult?.error);
+      showToast(`Order #${orderNumber} registered! Please complete payment at the cashier.`, 'info');
+    }
+
+    // 5. Render Confirmed Order Ticket & Complete checkout
+    renderConfirmedOrderTicket(orderNumber, safeNickname, invoiceString, dateStr, timeStr, total, count, notesInput, emailInput, false);
+    cart = [];
+    syncUI();
+    updateCartInputsState();
+  } catch (err) {
+    console.error('Error during placeOrder:', err);
+    showToast('An unexpected error occurred while placing your order. Please check with staff.', 'error');
+    if (placeBtn) placeBtn.disabled = false;
+  } finally {
+    if (!isRedirecting) {
+      if (loadingOverlay) loadingOverlay.classList.add('hidden');
+      if (progressBar) progressBar.classList.remove('active');
+    }
   }
 }
 
@@ -2451,52 +2891,134 @@ if (menuSearchClear && menuSearchInput) {
   });
 }
 
-if (menuSearchInput) {
-  menuSearchInput.addEventListener('input', (e) => {
-    const rawVal = e.target.value.trim();
-    if (menuSearchClear) {
-      if (rawVal.length > 0) menuSearchClear.classList.remove('hidden');
-      else menuSearchClear.classList.add('hidden');
-    }
-    const query = removeAccents(rawVal.toLowerCase());
-    const mainContent = document.querySelectorAll('.filterable-title, .filterable-item'); 
-    const searchContainer = document.getElementById('searchResultsContainer');
-    const searchGrid = document.getElementById('searchResultsGrid');
-    const noResults = document.getElementById('noResultsMsg');
+function runMenuSearch() {
+  if (!menuSearchInput) return;
+  const rawVal = menuSearchInput.value.trim();
+  if (menuSearchClear) {
+    if (rawVal.length > 0) menuSearchClear.classList.remove('hidden');
+    else menuSearchClear.classList.add('hidden');
+  }
+  const query = removeAccents(rawVal.toLowerCase());
+  const mainContent = document.querySelectorAll('.filterable-title, .filterable-item'); 
+  const searchContainer = document.getElementById('searchResultsContainer');
+  const searchGrid = document.getElementById('searchResultsGrid');
+  const noResults = document.getElementById('noResultsMsg');
+  const emptyPriceEl = document.getElementById('menuPriceEmptyState');
 
-    if (!query) {
-      if (searchContainer) searchContainer.classList.add('hidden');
-      mainContent.forEach(el => el.dataset.hidden = 'false');
-      return;
-    }
+  if (!query) {
+    if (searchContainer) searchContainer.classList.add('hidden');
+    mainContent.forEach(el => el.dataset.hidden = 'false');
+    buildGrids();
+    return;
+  }
 
-    mainContent.forEach(el => el.dataset.hidden = 'true');
-    if (searchContainer) searchContainer.classList.remove('hidden');
-    if (searchGrid) searchGrid.innerHTML = '';
+  if (emptyPriceEl) emptyPriceEl.classList.add('hidden');
+  mainContent.forEach(el => el.dataset.hidden = 'true');
+  if (searchContainer) searchContainer.classList.remove('hidden');
+  if (searchGrid) searchGrid.innerHTML = '';
+  
+  const matchedItems = [];
+  ALL_ITEMS.forEach(item => {
+    if (!isItemInPriceRange(item, MENU_MIN_PRICE, MENU_MAX_PRICE)) return;
+    const itemName = item.productName || item.name || '';
+    const itemDesc = getProductDescription(item);
+    const catVal = item.cat || '';
+    const catName = item.categoryName || '';
+    const searchable = removeAccents(`${itemName} ${itemDesc} ${catVal} ${catName} ${item.productId || item.uid}`).toLowerCase();
     
-    let matches = 0;
-    ALL_ITEMS.forEach(item => {
-      const itemName = item.productName || item.name || '';
-      const itemDesc = getProductDescription(item);
-      const catVal = item.cat || '';
-      const catName = item.categoryName || '';
-      const searchable = removeAccents(`${itemName} ${itemDesc} ${catVal} ${catName} ${item.productId || item.uid}`).toLowerCase();
-      
-      if (searchable.includes(query)) {
-        if (searchGrid) searchGrid.appendChild(makeCard(item));
-        matches++;
-      }
-    });
-
-    if (matches === 0) {
-      if (searchGrid) searchGrid.classList.add('hidden');
-      if (noResults) noResults.classList.remove('hidden');
-    } else {
-      if (searchGrid) searchGrid.classList.remove('hidden');
-      if (noResults) noResults.classList.add('hidden');
+    if (searchable.includes(query)) {
+      matchedItems.push(item);
     }
   });
+
+  const sortedMatches = sortItemsByPrice(matchedItems, MENU_PRICE_SORT);
+  sortedMatches.forEach(item => {
+    if (searchGrid) searchGrid.appendChild(makeCard(item));
+  });
+
+  if (sortedMatches.length === 0) {
+    if (searchGrid) searchGrid.classList.add('hidden');
+    if (noResults) noResults.classList.remove('hidden');
+  } else {
+    if (searchGrid) searchGrid.classList.remove('hidden');
+    if (noResults) noResults.classList.add('hidden');
+  }
 }
+
+if (menuSearchInput) {
+  menuSearchInput.addEventListener('input', runMenuSearch);
+}
+
+function updateMenuPriceControlsUI() {
+  document.querySelectorAll('.price-sort-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.sort === MENU_PRICE_SORT);
+  });
+  const resetBtn = document.getElementById('menuPriceResetBtn');
+  if (resetBtn) {
+    const isModified = MENU_PRICE_SORT !== 'default' || MENU_MIN_PRICE !== null || MENU_MAX_PRICE !== null;
+    resetBtn.classList.toggle('hidden', !isModified);
+  }
+}
+
+function applyMenuPriceFilterAndSort() {
+  updateMenuPriceControlsUI();
+  buildGrids();
+  if (menuSearchInput && menuSearchInput.value.trim().length > 0) {
+    runMenuSearch();
+  }
+}
+
+function setMenuPriceSort(sortOrder) {
+  MENU_PRICE_SORT = ['default', 'asc', 'desc'].includes(sortOrder) ? sortOrder : 'default';
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('sortPrice');
+  applyMenuPriceFilterAndSort();
+}
+
+function setMenuCustomPriceRange(minVal, maxVal) {
+  const cleanMin = (minVal !== null && minVal !== undefined && String(minVal).trim() !== '' && !isNaN(Number(minVal)) && Number(minVal) >= 0)
+    ? Number(minVal)
+    : null;
+  const cleanMax = (maxVal !== null && maxVal !== undefined && String(maxVal).trim() !== '' && !isNaN(Number(maxVal)) && Number(maxVal) >= 0)
+    ? Number(maxVal)
+    : null;
+  MENU_MIN_PRICE = cleanMin;
+  MENU_MAX_PRICE = cleanMax;
+  if (CustomerSessionManager) CustomerSessionManager.recordActivity('filterPriceRange');
+  applyMenuPriceFilterAndSort();
+}
+
+function resetMenuPriceControls() {
+  MENU_PRICE_SORT = 'default';
+  MENU_MIN_PRICE = null;
+  MENU_MAX_PRICE = null;
+  const minInput = document.getElementById('menuMinPrice');
+  const maxInput = document.getElementById('menuMaxPrice');
+  if (minInput) minInput.value = '';
+  if (maxInput) maxInput.value = '';
+  applyMenuPriceFilterAndSort();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.price-sort-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setMenuPriceSort(btn.dataset.sort || 'default');
+    });
+  });
+
+  const minInput = document.getElementById('menuMinPrice');
+  const maxInput = document.getElementById('menuMaxPrice');
+  const handlePriceRangeInput = () => {
+    setMenuCustomPriceRange(minInput ? minInput.value : null, maxInput ? maxInput.value : null);
+  };
+  if (minInput) minInput.addEventListener('input', handlePriceRangeInput);
+  if (maxInput) maxInput.addEventListener('input', handlePriceRangeInput);
+
+  const resetBtn = document.getElementById('menuPriceResetBtn');
+  if (resetBtn) resetBtn.addEventListener('click', resetMenuPriceControls);
+
+  const emptyResetBtn = document.getElementById('menuEmptyResetBtn');
+  if (emptyResetBtn) emptyResetBtn.addEventListener('click', resetMenuPriceControls);
+});
 
 // ═════════════════════════════════════════
 // 7. MODALS, SIZES, ADD-ONS & DIGITAL RECEIPT
@@ -3276,17 +3798,21 @@ async function loadPromosFromSupabase() {
 }
 
 // ═════════════════════════════════════════
-// 8. VIRTUAL BARISTA 3-LAYER QUIZ & RECOMMENDATIONS
+// 8. VIRTUAL BARISTA 5-STEP QUIZ & RECOMMENDATIONS
 // ═════════════════════════════════════════
 const QUIZ_STATE = {
-  step: 1, // 1: Drink vs Snack, 2: Temp or Food Category, 3: Drink Base or Food Flavor, 4: Taste Note or Food Portion
-  totalSteps: 4,
+  step: 1, // 1: Drink vs Snack, 2: Temp or Food Category, 3: Drink Base or Food Flavor, 4: Taste Note or Food Portion, 5: Custom Price Range
+  totalSteps: 5,
+  recSortOrder: 'match', // 'match' | 'asc' | 'desc'
   answers: {
     type: null,           // 'drink' or 'snack'
     tempOrCategory: null, // 'cold' | 'hot' (drink) or 'waffle' | 'sandwich' | 'snack' | 'meal' | 'any' (food)
     baseOrFlavor: null,   // 'coffee' | 'blended' | 'tea' | 'matcha_choco' | 'soda' | 'milk_coffee' | 'any' (drink) or 'sweet' | 'savory' | 'meaty' (food)
     tasteOrStyle: null,   // 'sweet' | 'bold' | 'fruity' | 'chocolate' (drink) or 'bites' | 'meal' | 'crispy' (food)
-    tempOrFlavor: null    // legacy alias for backwards compatibility
+    tempOrFlavor: null,   // legacy alias for backwards compatibility
+    priceRange: 'any',    // 'any' | 'under100' | '100to150' | 'above150' | 'custom'
+    minPrice: null,       // custom minimum price (number or null)
+    maxPrice: null        // custom maximum price (number or null)
   },
   history: []
 };
@@ -3316,6 +3842,44 @@ function initVirtualBaristaQuiz() {
       if (e.target === quizOverlay) closeQuiz();
     });
   }
+
+  // Bind recommendation results custom price bar controls
+  const resApplyBtn = document.getElementById('quizResultApplyPriceBtn');
+  const resClearBtn = document.getElementById('quizResultClearPriceBtn');
+  const resMinInput = document.getElementById('quizResultMinPrice');
+  const resMaxInput = document.getElementById('quizResultMaxPrice');
+
+  if (resApplyBtn) {
+    resApplyBtn.addEventListener('click', () => {
+      const rawMin = resMinInput ? resMinInput.value : '';
+      const rawMax = resMaxInput ? resMaxInput.value : '';
+      const cleanMin = (rawMin !== null && rawMin !== undefined && String(rawMin).trim() !== '' && !isNaN(Number(rawMin)) && Number(rawMin) >= 0) ? Number(rawMin) : null;
+      const cleanMax = (rawMax !== null && rawMax !== undefined && String(rawMax).trim() !== '' && !isNaN(Number(rawMax)) && Number(rawMax) >= 0) ? Number(rawMax) : null;
+      QUIZ_STATE.answers.minPrice = cleanMin;
+      QUIZ_STATE.answers.maxPrice = cleanMax;
+      QUIZ_STATE.answers.priceRange = (cleanMin !== null || cleanMax !== null) ? 'custom' : 'any';
+      generateQuizRecommendations();
+    });
+  }
+
+  if (resClearBtn) {
+    resClearBtn.addEventListener('click', () => {
+      QUIZ_STATE.answers.minPrice = null;
+      QUIZ_STATE.answers.maxPrice = null;
+      QUIZ_STATE.answers.priceRange = 'any';
+      if (resMinInput) resMinInput.value = '';
+      if (resMaxInput) resMaxInput.value = '';
+      generateQuizRecommendations();
+    });
+  }
+
+  document.querySelectorAll('.quiz-sort-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      QUIZ_STATE.recSortOrder = btn.dataset.recSort || 'match';
+      document.querySelectorAll('.quiz-sort-pill').forEach(b => b.classList.toggle('active', b === btn));
+      generateQuizRecommendations();
+    });
+  });
 }
 
 function openQuiz() {
@@ -3338,22 +3902,40 @@ function closeQuiz() {
 
 function resetQuiz() {
   QUIZ_STATE.step = 1;
+  QUIZ_STATE.recSortOrder = 'match';
   QUIZ_STATE.answers = {
     type: null,
     tempOrCategory: null,
     baseOrFlavor: null,
     tasteOrStyle: null,
-    tempOrFlavor: null
+    tempOrFlavor: null,
+    priceRange: 'any',
+    minPrice: null,
+    maxPrice: null
   };
   QUIZ_STATE.history = [];
 
   const resultsSection = document.getElementById('cravingResultsSection');
   if (resultsSection) resultsSection.classList.add('hidden');
 
+  const customBox = document.getElementById('quizCustomPriceBox');
+  if (customBox) customBox.classList.add('hidden');
+
   renderQuizStep();
 }
 
 function goBackQuizStep() {
+  const resultsSection = document.getElementById('cravingResultsSection');
+  const isResultsVisible = resultsSection && !resultsSection.classList.contains('hidden');
+
+  if (isResultsVisible) {
+    // Return to Step 5 (Price Range step) from results view
+    resultsSection.classList.add('hidden');
+    QUIZ_STATE.step = 5;
+    renderQuizStep();
+    return;
+  }
+
   if (QUIZ_STATE.step > 1) {
     QUIZ_STATE.step--;
     QUIZ_STATE.history.pop();
@@ -3363,6 +3945,9 @@ function goBackQuizStep() {
       QUIZ_STATE.answers.baseOrFlavor = null;
       QUIZ_STATE.answers.tasteOrStyle = null;
       QUIZ_STATE.answers.tempOrFlavor = null;
+      QUIZ_STATE.answers.priceRange = 'any';
+      QUIZ_STATE.answers.minPrice = null;
+      QUIZ_STATE.answers.maxPrice = null;
     } else if (QUIZ_STATE.step === 2) {
       QUIZ_STATE.answers.tempOrCategory = null;
       QUIZ_STATE.answers.baseOrFlavor = null;
@@ -3378,7 +3963,6 @@ function goBackQuizStep() {
       QUIZ_STATE.answers.tasteOrStyle = null;
     }
 
-    const resultsSection = document.getElementById('cravingResultsSection');
     if (resultsSection) resultsSection.classList.add('hidden');
 
     renderQuizStep();
@@ -3390,6 +3974,7 @@ function renderQuizStep() {
   const titleEl = document.getElementById('quiz-question');
   const hintEl = document.getElementById('quiz-hint');
   const optionsContainer = document.getElementById('quiz-options');
+  const customPriceBox = document.getElementById('quizCustomPriceBox');
   const backBtn = document.getElementById('quiz-back-btn');
   const resetBtn = document.getElementById('quiz-reset');
 
@@ -3397,9 +3982,10 @@ function renderQuizStep() {
 
   if (backBtn) backBtn.classList.toggle('hidden', QUIZ_STATE.step === 1);
   if (resetBtn) resetBtn.classList.toggle('hidden', QUIZ_STATE.step === 1);
+  if (customPriceBox) customPriceBox.classList.add('hidden');
 
   if (QUIZ_STATE.step === 1) {
-    if (badgeEl) badgeEl.textContent = 'Step 1 of 4';
+    if (badgeEl) badgeEl.textContent = 'Step 1 of 5';
     titleEl.textContent = 'What are you in the mood for?';
     if (hintEl) hintEl.textContent = 'Start by choosing a drink or something delicious to eat';
 
@@ -3412,7 +3998,7 @@ function renderQuizStep() {
       </button>
     `;
   } else if (QUIZ_STATE.step === 2) {
-    if (badgeEl) badgeEl.textContent = 'Step 2 of 4';
+    if (badgeEl) badgeEl.textContent = 'Step 2 of 5';
 
     if (QUIZ_STATE.answers.type === 'drink') {
       titleEl.textContent = 'How would you like your drink served?';
@@ -3449,7 +4035,7 @@ function renderQuizStep() {
       `;
     }
   } else if (QUIZ_STATE.step === 3) {
-    if (badgeEl) badgeEl.textContent = 'Step 3 of 4';
+    if (badgeEl) badgeEl.textContent = 'Step 3 of 5';
 
     if (QUIZ_STATE.answers.type === 'drink') {
       const isHot = QUIZ_STATE.answers.tempOrCategory === 'hot';
@@ -3510,7 +4096,7 @@ function renderQuizStep() {
       `;
     }
   } else if (QUIZ_STATE.step === 4) {
-    if (badgeEl) badgeEl.textContent = 'Step 4 of 4';
+    if (badgeEl) badgeEl.textContent = 'Step 4 of 5';
 
     if (QUIZ_STATE.answers.type === 'drink') {
       titleEl.textContent = 'What flavor note do you prefer?';
@@ -3610,7 +4196,69 @@ function renderQuizStep() {
         `;
       }
     }
+  } else if (QUIZ_STATE.step === 5) {
+    if (badgeEl) badgeEl.textContent = 'Step 5 of 5';
+    titleEl.textContent = 'What is your preferred price range?';
+    if (hintEl) hintEl.textContent = 'Choose a budget option or enter your own custom price range below';
+
+    optionsContainer.innerHTML = `
+      <button class="craving-btn" onclick="handleQuizAnswer(5, 'any')">
+        <span>✨ Any Price Range</span>
+      </button>
+      <button class="craving-btn" onclick="handleQuizAnswer(5, 'under100')">
+        <span>💸 Under ₱100</span>
+      </button>
+      <button class="craving-btn" onclick="handleQuizAnswer(5, '100to150')">
+        <span>💵 ₱100 – ₱150</span>
+      </button>
+      <button class="craving-btn" onclick="handleQuizAnswer(5, 'above150')">
+        <span>💎 ₱150 & Above</span>
+      </button>
+    `;
+
+    if (customPriceBox) {
+      const minVal = QUIZ_STATE.answers.minPrice !== null && QUIZ_STATE.answers.minPrice !== undefined ? QUIZ_STATE.answers.minPrice : '';
+      const maxVal = QUIZ_STATE.answers.maxPrice !== null && QUIZ_STATE.answers.maxPrice !== undefined ? QUIZ_STATE.answers.maxPrice : '';
+      customPriceBox.classList.remove('hidden');
+      customPriceBox.innerHTML = `
+        <div class="quiz-custom-price-title">🎯 Or Enter Your Custom Price Range (₱)</div>
+        <div class="quiz-custom-price-row">
+          <div class="quiz-custom-input-wrap">
+            <span class="currency-prefix">₱</span>
+            <input type="number" id="quizCustomMinInput" class="quiz-custom-input" placeholder="Min (e.g. 70)" min="0" step="1" inputmode="numeric" value="${minVal}">
+          </div>
+          <span style="color: white; font-weight: 800;">–</span>
+          <div class="quiz-custom-input-wrap">
+            <span class="currency-prefix">₱</span>
+            <input type="number" id="quizCustomMaxInput" class="quiz-custom-input" placeholder="Max (e.g. 140)" min="0" step="1" inputmode="numeric" value="${maxVal}">
+          </div>
+          <button type="button" class="quiz-custom-apply-btn" id="quizCustomApplyBtn" onclick="applyQuizCustomPrice()">Find Matches →</button>
+        </div>
+      `;
+    }
   }
+}
+
+function applyQuizCustomPrice() {
+  const minInput = document.getElementById('quizCustomMinInput');
+  const maxInput = document.getElementById('quizCustomMaxInput');
+  const rawMin = minInput ? minInput.value : '';
+  const rawMax = maxInput ? maxInput.value : '';
+
+  let cleanMin = (rawMin !== null && rawMin !== undefined && String(rawMin).trim() !== '' && !isNaN(Number(rawMin)) && Number(rawMin) >= 0) ? Number(rawMin) : null;
+  let cleanMax = (rawMax !== null && rawMax !== undefined && String(rawMax).trim() !== '' && !isNaN(Number(rawMax)) && Number(rawMax) >= 0) ? Number(rawMax) : null;
+
+  if (cleanMin !== null && cleanMax !== null && cleanMin > cleanMax) {
+    const tmp = cleanMin;
+    cleanMin = cleanMax;
+    cleanMax = tmp;
+  }
+
+  QUIZ_STATE.answers.minPrice = cleanMin;
+  QUIZ_STATE.answers.maxPrice = cleanMax;
+  QUIZ_STATE.answers.priceRange = (cleanMin !== null || cleanMax !== null) ? 'custom' : 'any';
+  QUIZ_STATE.history.push('custom');
+  generateQuizRecommendations();
 }
 
 function handleQuizAnswer(step, choice) {
@@ -3634,6 +4282,23 @@ function handleQuizAnswer(step, choice) {
     renderQuizStep();
   } else if (step === 4) {
     QUIZ_STATE.answers.tasteOrStyle = choice;
+    QUIZ_STATE.step = 5;
+    renderQuizStep();
+  } else if (step === 5) {
+    QUIZ_STATE.answers.priceRange = choice;
+    if (choice === 'under100') {
+      QUIZ_STATE.answers.minPrice = 0;
+      QUIZ_STATE.answers.maxPrice = 100;
+    } else if (choice === '100to150') {
+      QUIZ_STATE.answers.minPrice = 100;
+      QUIZ_STATE.answers.maxPrice = 150;
+    } else if (choice === 'above150') {
+      QUIZ_STATE.answers.minPrice = 150;
+      QUIZ_STATE.answers.maxPrice = null;
+    } else {
+      QUIZ_STATE.answers.minPrice = null;
+      QUIZ_STATE.answers.maxPrice = null;
+    }
     generateQuizRecommendations();
   }
 }
@@ -3642,7 +4307,7 @@ function calculateQuizMatchScore(item, answers) {
   if (!item) return -999;
 
   const type = answers.type;
-  // Normalize parameters from either 3-step or 4-step quiz
+  // Normalize parameters from 3-step, 4-step, or 5-step quiz
   const tempPref = answers.temp || (type === 'drink' ? (answers.tempOrCategory || answers.tempOrFlavor) : null);
   const drinkBasePref = answers.drinkBase || (type === 'drink' ? (answers.baseOrFlavor && answers.baseOrFlavor !== 'cold' && answers.baseOrFlavor !== 'hot' ? answers.baseOrFlavor : null) : null);
 
@@ -3670,7 +4335,42 @@ function calculateQuizMatchScore(item, answers) {
   if (type === 'drink' && (!isDrink || recInfoSaysFood)) return -999;
   if (type === 'snack' && (!isFood || recInfoSaysDrink)) return -999;
 
-  let score = 0;
+  // 1.5 Custom Price Range enforcement when customer specifies minPrice and/or maxPrice
+  const hasMinPrice = answers.minPrice !== null && answers.minPrice !== undefined && String(answers.minPrice).trim() !== '' && !isNaN(Number(answers.minPrice));
+  const hasMaxPrice = answers.maxPrice !== null && answers.maxPrice !== undefined && String(answers.maxPrice).trim() !== '' && !isNaN(Number(answers.maxPrice));
+  let priceBoost = 0;
+
+  if (hasMinPrice || hasMaxPrice) {
+    let minVal = hasMinPrice ? Number(answers.minPrice) : 0;
+    let maxVal = hasMaxPrice ? Number(answers.maxPrice) : Infinity;
+    if (hasMinPrice && hasMaxPrice && minVal > maxVal) {
+      const tmp = minVal;
+      minVal = maxVal;
+      maxVal = tmp;
+    }
+
+    const hasSizesArr = Array.isArray(item.sizes) && item.sizes.length > 0;
+    if (hasSizesArr) {
+      const matchesAnySize = item.sizes.some(s => {
+        const p = Number(s.price) || 0;
+        return p >= minVal && p <= maxVal;
+      });
+      if (!matchesAnySize) return -999;
+      priceBoost = 20;
+    } else {
+      const rawP = (item.promoPrice !== null && item.promoPrice !== undefined && item.promoPrice !== '')
+        ? Number(item.promoPrice)
+        : ((item.price !== null && item.price !== undefined && item.price !== '')
+            ? Number(item.price)
+            : ((item.minPrice !== null && item.minPrice !== undefined && item.minPrice !== '') ? Number(item.minPrice) : NaN));
+      if (!isNaN(rawP)) {
+        if (rawP < minVal || rawP > maxVal) return -999;
+        priceBoost = 20;
+      }
+    }
+  }
+
+  let score = priceBoost;
 
   if (type === 'drink') {
     const isExplicitHot = /^hot\b/i.test(name);
@@ -3833,18 +4533,43 @@ function calculateQuizMatchScore(item, answers) {
 }
 
 function generateQuizRecommendations() {
-  const { type, tempOrFlavor, tasteOrStyle } = (QUIZ_STATE && QUIZ_STATE.answers) ? QUIZ_STATE.answers : {};
+  const { type, minPrice, maxPrice } = (QUIZ_STATE && QUIZ_STATE.answers) ? QUIZ_STATE.answers : {};
   const resultsSection = document.getElementById('cravingResultsSection');
   const container = document.getElementById('recommendationContainer');
   const badgeEl = document.getElementById('quizStepBadge');
   const titleEl = document.getElementById('quiz-question');
   const hintEl = document.getElementById('quiz-hint');
   const optionsContainer = document.getElementById('quiz-options');
+  const customPriceBox = document.getElementById('quizCustomPriceBox');
 
   if (badgeEl) badgeEl.textContent = 'Recommendations Ready';
   if (titleEl) titleEl.textContent = 'Here are your best matches!';
-  if (hintEl) hintEl.textContent = 'Handpicked by your virtual barista just for you.';
+
+  const hasCustomPrice = (minPrice !== null && minPrice !== undefined && String(minPrice).trim() !== '') ||
+                         (maxPrice !== null && maxPrice !== undefined && String(maxPrice).trim() !== '');
+  if (hintEl) {
+    if (hasCustomPrice) {
+      const minText = (minPrice !== null && minPrice !== undefined && String(minPrice).trim() !== '') ? `₱${minPrice}` : '₱0';
+      const maxText = (maxPrice !== null && maxPrice !== undefined && String(maxPrice).trim() !== '') ? `₱${maxPrice}` : 'Any';
+      hintEl.textContent = `Handpicked for you within your custom price range (${minText} – ${maxText}).`;
+    } else {
+      hintEl.textContent = 'Handpicked by your virtual barista just for you.';
+    }
+  }
   if (optionsContainer) optionsContainer.innerHTML = '';
+  if (customPriceBox) customPriceBox.classList.add('hidden');
+
+  // Sync the results custom price bar inputs & clear button
+  const resMinInput = document.getElementById('quizResultMinPrice');
+  const resMaxInput = document.getElementById('quizResultMaxPrice');
+  const resClearBtn = document.getElementById('quizResultClearPriceBtn');
+  if (resMinInput) resMinInput.value = (minPrice !== null && minPrice !== undefined) ? minPrice : '';
+  if (resMaxInput) resMaxInput.value = (maxPrice !== null && maxPrice !== undefined) ? maxPrice : '';
+  if (resClearBtn) resClearBtn.classList.toggle('hidden', !hasCustomPrice);
+
+  document.querySelectorAll('.quiz-sort-pill').forEach(btn => {
+    btn.classList.toggle('active', (btn.dataset.recSort || 'match') === (QUIZ_STATE.recSortOrder || 'match'));
+  });
 
   // Diagnostic logging helper for non-production / development analysis
   const isDev = window.location.hostname === 'localhost' ||
@@ -3852,7 +4577,7 @@ function generateQuizRecommendations() {
                 window.location.search.includes('debug=true') ||
                 window.location.protocol === 'file:';
 
-  // 1. Only consider eligible, active products: enabled, not deleted, and in-stock
+  // 1. Only consider eligible, active products: enabled, not deleted, in-stock, and matching custom price range
   const eligibleProducts = (ALL_ITEMS || []).filter(item => {
     if (!item) return false;
     if (item.isdeleted === 1 || item.isdeleted === true || item.isDeleted === 1) return false;
@@ -3860,6 +4585,8 @@ function generateQuizRecommendations() {
     const catId = Number(item.categoryId);
     // Exclude Add-ons categories
     if (catId === 3 || catId === 14) return false;
+    // Strictly enforce custom price range if set
+    if (!isItemInPriceRange(item, minPrice, maxPrice)) return false;
     return true;
   });
 
@@ -3875,7 +4602,7 @@ function generateQuizRecommendations() {
 
   let matches = scoredItems.map(entry => entry.item);
 
-  // 3. Fallback to general in-stock pool of matching category type if fewer than 3 matches
+  // 3. Fallback to general in-stock pool of matching category type (still respecting custom price range) if fewer than 3 matches
   if (matches.length < 3) {
     const fallbackPool = eligibleProducts.filter(item => {
       const catId = Number(item.categoryId);
@@ -3896,7 +4623,12 @@ function generateQuizRecommendations() {
     }
   }
 
-  const selectedRecs = distinctMatches.slice(0, 6);
+  let selectedRecs = distinctMatches.slice(0, 6);
+
+  // 5. Apply optional ascending/descending price sort on recommended matches if selected
+  if (QUIZ_STATE.recSortOrder === 'asc' || QUIZ_STATE.recSortOrder === 'desc') {
+    selectedRecs = sortItemsByPrice(selectedRecs, QUIZ_STATE.recSortOrder);
+  }
 
   if (isDev) {
     console.group('🔍 [Quiz Recommendation Diagnostics]');
@@ -3918,7 +4650,15 @@ function generateQuizRecommendations() {
       container.innerHTML = selectedRecs.map(item => {
         const pName = item.productName || item.name;
         const hasItemSizes = (item.hasSizes || (item.sizes && item.sizes.length > 0)) && item.sizes && item.sizes.length > 0;
-        const pPrice = hasItemSizes ? `₱${item.minPrice}` : `₱${item.price || 0}`;
+        let pPrice = '';
+        if (hasItemSizes) {
+          const dispMin = item.promo ? item.promoMinPrice : item.minPrice;
+          const dispMax = item.promo ? item.promoMaxPrice : item.maxPrice;
+          pPrice = dispMin !== dispMax ? `₱${dispMin} - ₱${dispMax}` : `₱${dispMin}`;
+        } else {
+          const dispSingle = item.promo ? item.promoPrice : (item.price || 0);
+          pPrice = `₱${dispSingle}`;
+        }
         const pId = item.productId || item.uid;
         const pImg = getProductImage(item);
         const pDesc = getProductDescription(item);
@@ -3940,7 +4680,10 @@ function generateQuizRecommendations() {
         `;
       }).join('');
     } else {
-      container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--muted); padding: 20px;">No exact in-stock matches found right now. Please explore the main menu!</p>`;
+      const rangeMsg = hasCustomPrice
+        ? `No in-stock matches found in your custom price range (${minPrice != null ? '₱' + minPrice : '₱0'} – ${maxPrice != null ? '₱' + maxPrice : 'Any'}). Try adjusting your price range above!`
+        : `No exact in-stock matches found right now. Please explore the main menu!`;
+      container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--muted); padding: 20px;">${rangeMsg}</p>`;
     }
   }
 
@@ -3964,11 +4707,20 @@ function selectQuizRecommendation(productId) {
 
 // Make accessible for inline onclick handlers & automated testing
 window.handleQuizAnswer = handleQuizAnswer;
+window.applyQuizCustomPrice = applyQuizCustomPrice;
 window.selectQuizRecommendation = selectQuizRecommendation;
 window.CustomerSessionManager = CustomerSessionManager;
 window.calculateQuizMatchScore = calculateQuizMatchScore;
+window.isItemInPriceRange = isItemInPriceRange;
+window.sortItemsByPrice = sortItemsByPrice;
+window.getItemEffectiveSortPrice = getItemEffectiveSortPrice;
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { calculateQuizMatchScore };
+  module.exports = {
+    calculateQuizMatchScore,
+    isItemInPriceRange,
+    sortItemsByPrice,
+    getItemEffectiveSortPrice
+  };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -4023,6 +4775,13 @@ function setupCustomerInteractionTracking() {
     '.addon-btn',
     '.addon-toggle-pill',
     '.qty-btn',
+    '.price-sort-pill',
+    '#menuPriceResetBtn',
+    '#menuEmptyResetBtn',
+    '#quizCustomApplyBtn',
+    '#quizResultApplyPriceBtn',
+    '#quizResultClearPriceBtn',
+    '.quiz-sort-pill',
     '#btn-confirm-order',
     '#modalCloseBtn',
     '#navCartBtn',
@@ -4052,11 +4811,23 @@ function setupCustomerInteractionTracking() {
     }
   }, { passive: true });
 
-  // Input events (search, notes, nickname)
+  // Input events (search, notes, nickname, price filters)
   document.addEventListener('input', (e) => {
     if (!CustomerSessionManager || CustomerSessionManager.isExpired) return;
     const target = e.target;
-    if (target && (target.id === 'menuSearch' || target.id === 'customerNickname' || target.id === 'orderNotes' || target.id === 'customerEmail')) {
+    const trackedInputIds = [
+      'menuSearch',
+      'customerNickname',
+      'orderNotes',
+      'customerEmail',
+      'menuMinPrice',
+      'menuMaxPrice',
+      'quizCustomMinInput',
+      'quizCustomMaxInput',
+      'quizResultMinPrice',
+      'quizResultMaxPrice'
+    ];
+    if (target && trackedInputIds.includes(target.id)) {
       CustomerSessionManager.recordActivity('userInput');
     }
   }, { passive: true });
@@ -4069,6 +4840,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initVirtualBaristaQuiz();
   initRealtimeStockListener();
   setupCustomerInteractionTracking();
+  handlePayMongoReturn();
 
   // Initialize Customer Session Manager
   if (CustomerSessionManager) {
