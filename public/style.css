@@ -312,15 +312,36 @@
       font-size: clamp(65px, 11vw, 120px);
       opacity: .12; line-height: 1; pointer-events: none;
     }
-    .hero-text small {
+    .hero-text small,
+    .hero-titles small {
       color: rgba(255,255,255,0.7); font-size: clamp(10px, 1.1vw, 12px);
       letter-spacing: 2.5px; text-transform: uppercase; font-weight: 700;
       display: block;
     }
-    .hero-text h2 {
+    .hero-text h2,
+    .hero-titles h2 {
       font-family: var(--serif);
       font-size: clamp(20px, 3.2vw, 36px);
       color: white; margin-top: 6px; line-height: 1.25;
+    }
+    .hero-vibe-btn {
+      pointer-events: none;
+      margin-top: 15px;
+      background: white;
+      color: var(--primary);
+      border: none;
+      padding: 12px 24px;
+      border-radius: 50px;
+      font-family: var(--sans);
+      font-weight: 800;
+      font-size: 14px;
+      position: relative;
+      z-index: 2;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
     }
 
     .promo-slideshow {
@@ -3113,13 +3134,182 @@
       border-color: var(--primary);
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 768px) {
+      .menu-body {
+        padding-top: 10px !important;
+        padding-left: 10px !important;
+        padding-right: 10px !important;
+      }
+      .hero-grid {
+        gap: 8px !important;
+        margin-bottom: 8px !important;
+      }
+      .hero-banner,
+      .promo-slideshow {
+        min-height: unset !important;
+        padding: 10px 14px !important;
+        border-radius: 14px !important;
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 10px !important;
+      }
+      .hero-banner::after {
+        display: none !important;
+      }
+      .hero-text {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 10px !important;
+        width: 100% !important;
+      }
+      .hero-titles {
+        flex: 1;
+        min-width: 0;
+      }
+      .hero-titles small,
+      .hero-text small {
+        font-size: 9px !important;
+        letter-spacing: 1.2px !important;
+        margin-bottom: 2px !important;
+        color: rgba(255, 255, 255, 0.85);
+      }
+      .hero-titles h2,
+      .hero-text h2 {
+        font-size: 14.5px !important;
+        margin-top: 0 !important;
+        line-height: 1.2 !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .hero-vibe-btn {
+        margin-top: 0 !important;
+        padding: 6px 14px !important;
+        font-size: 11.5px !important;
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
+        border-radius: 40px !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+      }
+
+      /* Compact Sticky Search, Filter & Categories */
+      .sticky-menu-controls {
+        top: 50px !important;
+        padding-top: 2px !important;
+        padding-bottom: 2px !important;
+        margin-bottom: 6px !important;
+      }
+      .sticky-menu-controls .search-container {
+        margin-bottom: 5px !important;
+      }
+      #menuSearch {
+        height: 38px !important;
+        min-height: 38px !important;
+        font-size: 12.5px !important;
+        padding: 0 34px 0 34px !important;
+        border-radius: 12px !important;
+      }
+      .search-icon {
+        left: 10px !important;
+        font-size: 13px !important;
+      }
+      .search-clear-btn {
+        width: 22px !important;
+        height: 22px !important;
+        right: 8px !important;
+        font-size: 13px !important;
+      }
       .menu-price-controls {
-        padding: 8px 10px;
-        gap: 6px 10px;
+        padding: 5px 8px !important;
+        gap: 4px !important;
+        margin-bottom: 6px !important;
+        border-radius: 12px !important;
+      }
+      .price-sort-group,
+      .price-range-group {
+        width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        scrollbar-width: none !important;
+        -webkit-overflow-scrolling: touch !important;
+      }
+      .price-sort-group::-webkit-scrollbar,
+      .price-range-group::-webkit-scrollbar {
+        display: none !important;
+      }
+      .price-ctrl-label {
+        font-size: 9.5px !important;
+        letter-spacing: 0.3px !important;
+        flex-shrink: 0 !important;
+        margin-right: 2px !important;
+      }
+      .price-sort-pill {
+        min-height: 25px !important;
+        height: 25px !important;
+        padding: 2px 8px !important;
+        font-size: 10.5px !important;
+        border-radius: 20px !important;
+        flex-shrink: 0 !important;
       }
       .price-range-input {
-        width: 68px;
+        width: 52px !important;
+        height: 25px !important;
+        font-size: 10.5px !important;
+        padding: 2px 4px 2px 15px !important;
+        border-radius: 8px !important;
+      }
+      .currency-prefix {
+        left: 5px !important;
+        font-size: 10px !important;
+      }
+      .price-range-sep {
+        font-size: 10px !important;
+        flex-shrink: 0 !important;
+      }
+      .price-reset-btn {
+        height: 25px !important;
+        padding: 2px 8px !important;
+        font-size: 10.5px !important;
+        border-radius: 10px !important;
+        flex-shrink: 0 !important;
+      }
+      .cat-row {
+        margin-bottom: 2px !important;
+        gap: 6px !important;
+      }
+      .cat-pill {
+        min-height: 32px !important;
+        padding: 4px 12px !important;
+        font-size: 11.5px !important;
+      }
+      .section-hd {
+        margin-top: 8px !important;
+        margin-bottom: 6px !important;
+      }
+      .section-hd h3 {
+        font-size: 16px !important;
+      }
+      .slide {
+        padding: 10px 14px !important;
+      }
+      .slide-fomo {
+        font-size: 9px !important;
+        margin-bottom: 2px !important;
+      }
+      .slide-name {
+        font-size: 14px !important;
+        margin-bottom: 4px !important;
+      }
+      .slide-promo {
+        font-size: 10px !important;
+        padding: 3px 8px !important;
       }
     }
 

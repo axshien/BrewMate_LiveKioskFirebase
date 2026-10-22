@@ -229,6 +229,34 @@ const CustomerSessionManager = {
 
   async submitOrderDirectFallback(kioskPayload) {
     if (!db) return { success: false, message: 'Database connection unavailable' };
+    const targetOrderNum = String(kioskPayload.kioskordernumber || '');
+
+    // Check if an order with this queue number already exists in chill_kiosk_queue
+    if (targetOrderNum) {
+      try {
+        const { data: existingOrder } = await db
+          .from('chill_kiosk_queue')
+          .select('kioskqueueid, kioskordernumber, payment_status, status')
+          .eq('kioskordernumber', targetOrderNum)
+          .maybeSingle();
+
+        if (existingOrder && existingOrder.kioskqueueid && existingOrder.payment_status !== 'PAID') {
+          // Order already exists and is pending: update existing row rather than inserting duplicate!
+          const { data: updData, error: updErr } = await db
+            .from('chill_kiosk_queue')
+            .update(kioskPayload)
+            .eq('kioskqueueid', existingOrder.kioskqueueid)
+            .select();
+
+          if (!updErr && updData?.[0]) {
+            return { success: true, order: updData[0], orderNumber: targetOrderNum, isUpdate: true };
+          }
+        }
+      } catch (checkErr) {
+        console.warn('Queue order lookup before insert:', checkErr);
+      }
+    }
+
     const { data, error } = await db.from('chill_kiosk_queue').insert([kioskPayload]).select();
     if (error) {
       let fallback = { ...kioskPayload };
@@ -2052,7 +2080,6 @@ function updateCartInputsState() {
   const nickInput = document.getElementById('customerNickname');
   const emailInput = document.getElementById('customerEmail');
   const notesInput = document.getElementById('orderNotes');
-  const ewalletSelect = document.getElementById('ewalletSelect');
   const payRadios = document.querySelectorAll('input[name="payment"]');
   const orderTypeBtns = document.querySelectorAll('.order-type-btn');
 
@@ -2070,9 +2097,6 @@ function updateCartInputsState() {
     notesInput.disabled = !hasItems;
     notesInput.placeholder = hasItems ? "e.g. Less ice, oat milk, extra shot" : "Cart empty - add items first";
     if (!hasItems) notesInput.value = '';
-  }
-  if (ewalletSelect) {
-    ewalletSelect.disabled = !hasItems;
   }
   payRadios.forEach(r => r.disabled = !hasItems);
   orderTypeBtns.forEach(b => b.disabled = !hasItems);
@@ -2092,13 +2116,10 @@ document.querySelectorAll('input[name="payment"]').forEach(radio => {
   radio.addEventListener('change', e => {
     currentPaymentMethod = e.target.value;
     const panelCash = document.getElementById('panel-cash');
-    const panelDigital = document.getElementById('panel-digital');
     const panelPaymongo = document.getElementById('panel-paymongo');
     if (panelCash) panelCash.classList.add('hidden');
-    if (panelDigital) panelDigital.classList.add('hidden');
     if (panelPaymongo) panelPaymongo.classList.add('hidden');
     if (currentPaymentMethod === 'Cash' && panelCash) panelCash.classList.remove('hidden');
-    else if (currentPaymentMethod === 'E-Wallets' && panelDigital) panelDigital.classList.remove('hidden');
     else if (currentPaymentMethod.includes('PayMongo') && panelPaymongo) panelPaymongo.classList.remove('hidden');
   });
 });
@@ -2150,9 +2171,7 @@ function getUniqueRandomOrderNumber() {
 const PAYMONGO_CONFIG = {
   // Edge Function endpoints (with fallback to common naming schemes)
   CHECKOUT_ENDPOINTS: [
-    `${SUPABASE_URL}/functions/v1/create-paymongo-checkout`,
-    `${SUPABASE_URL}/functions/v1/paymongo-checkout`,
-    `${SUPABASE_URL}/functions/v1/paymongo`
+    `${SUPABASE_URL}/functions/v1/create-paymongo-checkout`
   ],
   POLL_INTERVAL_MS: 3000,
   MAX_POLL_ATTEMPTS: 20
@@ -2163,7 +2182,7 @@ async function callPayMongoCheckoutFunction(payload) {
   for (const ep of PAYMONGO_CONFIG.CHECKOUT_ENDPOINTS) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const resp = await fetch(ep, {
         method: 'POST',
@@ -2203,10 +2222,18 @@ async function callPayMongoCheckoutFunction(payload) {
 async function handlePayMongoReturn() {
   const urlParams = new URLSearchParams(window.location.search);
   const paymentStatus = urlParams.get('payment_status') || urlParams.get('status');
-  const orderNumber = urlParams.get('orderNumber') || urlParams.get('order_number');
+  const orderNumber = urlParams.get('orderNumber') || urlParams.get('order_number') || urlParams.get('queueNumber') || urlParams.get('queue_number');
   const queueId = urlParams.get('queueId') || urlParams.get('queue_id');
 
   if (!paymentStatus && !orderNumber) return;
+
+  let savedOrderInfo = null;
+  try {
+    const raw = sessionStorage.getItem('chill_pending_paymongo');
+    if (raw) savedOrderInfo = JSON.parse(raw);
+  } catch (e) {}
+
+  const targetOrderNum = String(orderNumber || savedOrderInfo?.orderNumber || '').trim();
 
   // Clean the URL query string immediately to prevent reload loops and avoid exposing parameters
   try {
@@ -2216,13 +2243,38 @@ async function handlePayMongoReturn() {
 
   // 1. If customer cancelled checkout on PayMongo
   if (paymentStatus === 'cancelled' || paymentStatus === 'cancel') {
+    if (savedOrderInfo && savedOrderInfo.rawCart && Array.isArray(savedOrderInfo.rawCart) && savedOrderInfo.rawCart.length > 0) {
+      cart = savedOrderInfo.rawCart;
+    } else if (savedOrderInfo && savedOrderInfo.items && Array.isArray(savedOrderInfo.items)) {
+      cart = savedOrderInfo.items;
+    }
+    if (savedOrderInfo && savedOrderInfo.nickname) {
+      const nickEl = document.getElementById('customerNickname');
+      if (nickEl) nickEl.value = savedOrderInfo.nickname;
+    }
+    if (savedOrderInfo && savedOrderInfo.email) {
+      const emailEl = document.getElementById('customerEmail');
+      if (emailEl) emailEl.value = savedOrderInfo.email;
+    }
+    if (savedOrderInfo && savedOrderInfo.notes) {
+      const notesEl = document.getElementById('orderNotes');
+      if (notesEl) notesEl.value = savedOrderInfo.notes;
+    }
+    if (savedOrderInfo && savedOrderInfo.orderType) {
+      currentOrderType = savedOrderInfo.orderType;
+      document.querySelectorAll('.order-type-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.type === currentOrderType);
+      });
+    }
+    syncUI();
+    updateCartInputsState();
     showToast('PayMongo checkout was cancelled. Your cart has been retained.', 'info');
     goTo('cartScreen');
     return;
   }
 
-  // 2. If returning to verify payment
-  if (paymentStatus === 'check' || paymentStatus === 'success' || paymentStatus === 'paid') {
+  // 2. If returning from PayMongo: verify payment & display existing invoice/receipt screen
+  if (paymentStatus === 'check' || paymentStatus === 'success' || paymentStatus === 'paid' || targetOrderNum) {
     const overlay = document.getElementById('paymongoVerificationOverlay');
     const titleEl = document.getElementById('paymongoVerifyTitle');
     const msgEl = document.getElementById('paymongoVerifyMsg');
@@ -2230,25 +2282,23 @@ async function handlePayMongoReturn() {
     const cancelBtn = document.getElementById('cancelPaymongoWaitingBtn');
 
     if (overlay) overlay.classList.remove('hidden');
+    if (titleEl) titleEl.textContent = 'Verifying PayMongo Payment';
+    if (msgEl) msgEl.textContent = targetOrderNum ? `Checking order #${targetOrderNum}...` : 'Confirming transaction...';
+    if (statusEl) statusEl.textContent = 'Contacting payment server...';
+
     if (cancelBtn) {
       cancelBtn.classList.add('hidden');
+      cancelBtn.textContent = 'View Order Receipt';
       cancelBtn.onclick = () => {
         if (overlay) overlay.classList.add('hidden');
-        goTo('cartScreen');
+        displayRetrievedOrder(targetOrderNum, false);
       };
-      // Reveal return button after 8 seconds of waiting
+      // Reveal direct receipt access button after 4 seconds of waiting
       setTimeout(() => {
         if (cancelBtn) cancelBtn.classList.remove('hidden');
-      }, 8000);
+      }, 4000);
     }
 
-    let savedOrderInfo = null;
-    try {
-      const raw = sessionStorage.getItem('chill_pending_paymongo');
-      if (raw) savedOrderInfo = JSON.parse(raw);
-    } catch (e) {}
-
-    const targetOrderNum = orderNumber || savedOrderInfo?.orderNumber;
     if (!targetOrderNum) {
       if (overlay) overlay.classList.add('hidden');
       showToast('Order reference not found for payment verification.', 'error');
@@ -2258,7 +2308,7 @@ async function handlePayMongoReturn() {
 
     let attempts = 0;
     const maxAttempts = PAYMONGO_CONFIG.MAX_POLL_ATTEMPTS;
-    let isVerified = false;
+    let isFinished = false;
 
     // Realtime subscription to chill_kiosk_queue
     let realtimeChannel = null;
@@ -2284,11 +2334,101 @@ async function handlePayMongoReturn() {
       } catch (e) {}
     }
 
+    // Authoritatively display the retrieved order and switch to existing receipt/invoice ticket
+    async function displayRetrievedOrder(orderNum, isVerifiedPaid, fallbackOrderData = null) {
+      if (isFinished) return;
+      isFinished = true;
+
+      if (realtimeChannel && db && typeof db.removeChannel === 'function') {
+        try { db.removeChannel(realtimeChannel); } catch (e) {}
+      }
+      if (overlay) overlay.classList.add('hidden');
+
+      let orderData = fallbackOrderData;
+      if (!orderData && db) {
+        try {
+          const { data } = await db
+            .from('chill_kiosk_queue')
+            .select('*')
+            .eq('kioskordernumber', String(orderNum))
+            .maybeSingle();
+          if (data) orderData = data;
+        } catch (e) {
+          console.warn('Error fetching order from DB:', e);
+        }
+      }
+
+      // Check authoritative server-verified payment status from DB record
+      const dbStatusPaid = orderData && (
+        (orderData.payment_status && String(orderData.payment_status).toUpperCase() === 'PAID') ||
+        (orderData.status && String(orderData.status).toLowerCase() === 'paid')
+      );
+      const finalPaidStatus = isVerifiedPaid || Boolean(dbStatusPaid);
+
+      // Extract items safely (handles parsed array or JSON string)
+      let itemsToRender = null;
+      if (orderData && orderData.items) {
+        if (Array.isArray(orderData.items)) {
+          itemsToRender = orderData.items;
+        } else if (typeof orderData.items === 'string') {
+          try { itemsToRender = JSON.parse(orderData.items); } catch (e) {}
+        }
+      }
+      if (!itemsToRender || !itemsToRender.length) {
+        if (savedOrderInfo && Array.isArray(savedOrderInfo.items) && savedOrderInfo.items.length) {
+          itemsToRender = savedOrderInfo.items;
+        } else if (savedOrderInfo && Array.isArray(savedOrderInfo.rawCart) && savedOrderInfo.rawCart.length) {
+          itemsToRender = savedOrderInfo.rawCart;
+        } else if (cart && cart.length) {
+          itemsToRender = cart;
+        } else {
+          itemsToRender = [];
+        }
+      }
+
+      const num = orderData?.kioskordernumber || orderNum || savedOrderInfo?.orderNumber || '0000';
+      const totalAmt = Number(orderData?.totalamount != null ? orderData.totalamount : (savedOrderInfo?.total || 0));
+      const nickname = orderData?.customerName || savedOrderInfo?.nickname || 'Guest';
+      const email = orderData?.customerEmail || orderData?.email || savedOrderInfo?.email || null;
+      const notes = orderData?.special_instructions || orderData?.notes || savedOrderInfo?.notes || null;
+      const countItems = itemsToRender.reduce((acc, it) => acc + (Number(it.qty) || 1), 0);
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
+      const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      const invoiceString = `#INV-${num}`;
+
+      // Clear pending cart once order is confirmed and displayed
+      cart = [];
+      syncUI();
+      updateCartInputsState();
+      try { sessionStorage.removeItem('chill_pending_paymongo'); } catch (e) {}
+
+      // Display existing invoice / receipt screen!
+      renderConfirmedOrderTicket(
+        num,
+        nickname,
+        invoiceString,
+        dateStr,
+        timeStr,
+        totalAmt,
+        countItems,
+        notes,
+        email,
+        finalPaidStatus,
+        itemsToRender
+      );
+    }
+
+    function onPaymentVerified(orderData) {
+      displayRetrievedOrder(targetOrderNum, true, orderData);
+    }
+
     async function checkPaymentStatus() {
-      if (isVerified) return;
+      if (isFinished) return;
       attempts++;
       if (statusEl) statusEl.textContent = `Verifying payment with ChillVentory server (${attempts}/${maxAttempts})...`;
 
+      // 1. Authoritative DB query
       try {
         if (db) {
           const { data, error } = await db
@@ -2312,67 +2452,53 @@ async function handlePayMongoReturn() {
         console.warn('Authoritative payment verification query:', e);
       }
 
-      if (attempts < maxAttempts && !isVerified) {
-        setTimeout(checkPaymentStatus, PAYMONGO_CONFIG.POLL_INTERVAL_MS);
-      } else if (!isVerified) {
-        if (titleEl) titleEl.textContent = 'Verification Pending';
-        if (msgEl) msgEl.textContent = 'Payment confirmation is still processing from the payment provider.';
-        if (statusEl) statusEl.textContent = 'Your order is pending in the queue. Show your payment reference to the cashier.';
-        if (cancelBtn) {
-          cancelBtn.classList.remove('hidden');
-          cancelBtn.textContent = 'Proceed to Kiosk Menu';
-          cancelBtn.onclick = () => {
-            if (overlay) overlay.classList.add('hidden');
-            goTo('menuScreen');
+      // 2. Direct server verification check via Edge Function on attempts 1 and 3
+      if (!isFinished && (attempts === 1 || attempts === 3)) {
+        try {
+          const verifyPayload = {
+            action: 'verify',
+            kioskordernumber: targetOrderNum,
+            orderNumber: targetOrderNum,
+            queueNumber: targetOrderNum,
+            sessionId: savedOrderInfo?.sessionId || null
           };
-        }
-        if (realtimeChannel && db && typeof db.removeChannel === 'function') {
-          try { db.removeChannel(realtimeChannel); } catch (e) {}
+          for (const ep of PAYMONGO_CONFIG.CHECKOUT_ENDPOINTS) {
+            const resp = await fetch(ep, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+              },
+              body: JSON.stringify(verifyPayload)
+            });
+            if (resp.ok) {
+              const resData = await resp.json();
+              if (resData.paid) {
+                onPaymentVerified(resData.order || null);
+                return;
+              }
+            }
+          }
+        } catch (verErr) {
+          console.warn('Edge Function verification check error:', verErr);
         }
       }
-    }
 
-    function onPaymentVerified(orderData) {
-      if (isVerified) return;
-      isVerified = true;
-      if (realtimeChannel && db && typeof db.removeChannel === 'function') {
-        try { db.removeChannel(realtimeChannel); } catch (e) {}
+      if (attempts < maxAttempts && !isFinished) {
+        setTimeout(checkPaymentStatus, PAYMONGO_CONFIG.POLL_INTERVAL_MS);
+      } else if (!isFinished) {
+        // Even if polling exhausted, retrieve saved order and display existing invoice/receipt screen with pending status
+        // DO NOT treat return URL as proof of payment and DO NOT dump user on homepage!
+        displayRetrievedOrder(targetOrderNum, false);
       }
-
-      try { sessionStorage.removeItem('chill_pending_paymongo'); } catch (e) {}
-      cart = [];
-      syncUI();
-      updateCartInputsState();
-
-      if (overlay) overlay.classList.add('hidden');
-
-      const num = orderData.kioskordernumber || targetOrderNum;
-      const totalAmt = Number(orderData.totalamount || savedOrderInfo?.total || 0);
-      const nickname = orderData.customerName || savedOrderInfo?.nickname || 'Guest';
-      const countItems = orderData.items ? (Array.isArray(orderData.items) ? orderData.items.length : 1) : (savedOrderInfo?.count || 1);
-      const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(',', '');
-      const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-      const invoiceString = `#INV-${num}`;
-
-      renderConfirmedOrderTicket(
-        num,
-        nickname,
-        invoiceString,
-        dateStr,
-        timeStr,
-        totalAmt,
-        countItems,
-        savedOrderInfo?.notes || null,
-        orderData.customerEmail || savedOrderInfo?.email || null,
-        true // isPayMongoVerified
-      );
     }
 
     checkPaymentStatus();
   }
 }
 
-function renderConfirmedOrderTicket(orderNumber, safeNickname, invoiceString, dateStr, timeStr, total, count, notesInput, emailInput, isPayMongoVerified = false) {
+function renderConfirmedOrderTicket(orderNumber, safeNickname, invoiceString, dateStr, timeStr, total, count, notesInput, emailInput, isPayMongoVerified = false, itemsToRender = null) {
   // Populate Order Details
   document.getElementById('queueNum').textContent = orderNumber;
   document.getElementById('confirmInvoice').textContent = invoiceString;
@@ -2383,8 +2509,13 @@ function renderConfirmedOrderTicket(orderNumber, safeNickname, invoiceString, da
   document.getElementById('confirmOrderType').textContent = currentOrderType;
   document.getElementById('confirmAmount').textContent = '₱' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
+  // Invoice Items Breakdown: Product initial price, separated addons, and line computation
+  const displayItemsToRender = (itemsToRender && Array.isArray(itemsToRender) && itemsToRender.length > 0)
+    ? itemsToRender
+    : (cart && cart.length > 0 ? cart : []);
+
   // Automatically render digital receipt so it's ready when user clicks "View Digital Receipt"
-  generateDigitalReceipt(safeNickname, invoiceString, dateStr, timeStr, total, count, 0, total, notesInput);
+  generateDigitalReceipt(safeNickname, invoiceString, dateStr, timeStr, total, count, 0, total, notesInput, displayItemsToRender);
 
   const confirmEmailRow = document.getElementById('confirmEmailRow');
   const confirmEmailEl = document.getElementById('confirmEmail');
@@ -2420,10 +2551,9 @@ function renderConfirmedOrderTicket(orderNumber, safeNickname, invoiceString, da
     }
   }
 
-  // Invoice Items Breakdown: Product initial price, separated addons, and line computation
   const itemsListContainer = document.getElementById('confirm-items-list');
   if (itemsListContainer) {
-    itemsListContainer.innerHTML = cart.map(item => {
+    itemsListContainer.innerHTML = displayItemsToRender.map(item => {
       const hasAddons = item.addons && item.addons.length > 0;
       const initialPrice = Number(item.initialPrice != null ? item.initialPrice : item.price);
       const initialPriceAmt = (initialPrice * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -2526,7 +2656,21 @@ async function placeOrder() {
   const count = cart.reduce((s,i) => s + i.qty, 0);
 
   // 1. Instant unique random order number (0ms!)
-  const orderNumber = getUniqueRandomOrderNumber();
+  // If customer is retrying PayMongo checkout for their pending order, reuse the existing
+  // queue number so duplicate order records are NEVER created!
+  let existingPendingNum = null;
+  try {
+    const raw = sessionStorage.getItem('chill_pending_paymongo');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.orderNumber) {
+        existingPendingNum = String(parsed.orderNumber).trim();
+      }
+    }
+  } catch (e) {}
+
+  const isPayMongoOrder = Boolean(currentPaymentMethod && currentPaymentMethod.includes('PayMongo'));
+  const orderNumber = (isPayMongoOrder && existingPendingNum) ? existingPendingNum : getUniqueRandomOrderNumber();
 
   // 2. Prepare payload including special instructions
   const kioskPayload = {
@@ -2607,18 +2751,22 @@ async function placeOrder() {
     if (currentPaymentMethod && currentPaymentMethod.includes('PayMongo')) {
       const loadingStatusText = document.querySelector('#orderLoadingOverlay .order-loading-status');
       const loadingTitleText = document.querySelector('#orderLoadingOverlay .order-loading-title');
-      if (loadingTitleText) loadingTitleText.textContent = 'Preparing PayMongo Checkout...';
-      if (loadingStatusText) loadingStatusText.textContent = 'Connecting to PayMongo Checkout...';
+      if (loadingTitleText) loadingTitleText.textContent = 'Redirecting to PayMongo...';
+      if (loadingStatusText) loadingStatusText.textContent = 'Connecting to PayMongo Hosted Checkout...';
 
       const returnOrigin = window.location.origin + window.location.pathname;
       const checkoutPayload = {
-        orderId: orderResult.order?.kioskqueueid || null,
         kioskordernumber: String(orderNumber),
+        orderNumber: String(orderNumber),
+        queueNumber: String(orderNumber),
+        queue_number: String(orderNumber),
         customerName: safeNickname,
         customerEmail: emailInput || null,
         items: kioskPayload.items,
+        cartItems: kioskPayload.items,
         totalAmount: Number(total),
-        successUrl: `${returnOrigin}?payment_status=check&orderNumber=${orderNumber}&queueId=${orderResult.order?.kioskqueueid || ''}`,
+        paymentMethodTypes: ['gcash', 'card', 'paymaya', 'grab_pay'],
+        successUrl: `${returnOrigin}?payment_status=check&orderNumber=${orderNumber}`,
         cancelUrl: `${returnOrigin}?payment_status=cancelled&orderNumber=${orderNumber}`
       };
 
@@ -2629,27 +2777,30 @@ async function placeOrder() {
         try {
           sessionStorage.setItem('chill_pending_paymongo', JSON.stringify({
             orderNumber: String(orderNumber),
-            queueId: orderResult.order?.kioskqueueid || null,
+            sessionId: checkoutResult.sessionId || null,
             total: Number(total),
             count: count,
             nickname: safeNickname,
             email: emailInput,
             notes: notesInput,
             orderType: currentOrderType,
+            rawCart: cart,
             items: kioskPayload.items
           }));
         } catch (e) {}
 
-        // Redirect customer to PayMongo Hosted Checkout
+        // Redirect customer browser directly to PayMongo Hosted Checkout URL
         window.location.href = checkoutResult.checkoutUrl;
         return;
       }
 
-      // If online checkout session endpoint is unreachable or times out,
-      // the order was ALREADY safely recorded in chill_kiosk_queue.
-      // Gracefully fall through to show confirmed order ticket and allow payment at counter/QR.
-      console.warn('PayMongo online checkout unavailable; order recorded in queue for counter/QR payment:', checkoutResult?.error);
-      showToast(`Order #${orderNumber} registered! Please complete payment at the cashier.`, 'info');
+      console.warn('PayMongo online checkout error:', checkoutResult?.error);
+      const errMsg = checkoutResult?.error || 'Unable to connect to PayMongo checkout.';
+      showToast(`${errMsg}. Please try again or pay at the counter.`, 'error');
+      if (placeBtn) placeBtn.disabled = false;
+      if (loadingOverlay) loadingOverlay.classList.add('hidden');
+      if (progressBar) progressBar.classList.remove('active');
+      return;
     }
 
     // 5. Render Confirmed Order Ticket & Complete checkout
@@ -3621,12 +3772,16 @@ if (fc) {
   fc.onclick = fcFn;
 }
 
-function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotalAmount, totalCount, discountAmount, finalTotal, specialInstructions = '') {
+function generateDigitalReceipt(nickname, invoiceNum, dateStr, timeStr, subtotalAmount, totalCount, discountAmount, finalTotal, specialInstructions = '', itemsList = null) {
   const paper = document.getElementById('receipt-paper');
   if (!paper) return;
 
+  const targetReceiptItems = (itemsList && Array.isArray(itemsList) && itemsList.length > 0)
+    ? itemsList
+    : (cart && cart.length > 0 ? cart : []);
+
   let itemsHTML = '';
-  cart.forEach(item => {
+  targetReceiptItems.forEach(item => {
     const hasAddons = item.addons && item.addons.length > 0;
     const initialPrice = Number(item.initialPrice != null ? item.initialPrice : item.price);
     const initialAmt = initialPrice * item.qty;

@@ -3,12 +3,15 @@
 -- ChillVentoryx Kiosk Ordering System
 -- ==============================================================================
 
--- 1. Add payment_status and payment_reference columns to chill_kiosk_queue
+-- 1. Add payment_status, payment_reference, and updatedat columns to chill_kiosk_queue
 ALTER TABLE public.chill_kiosk_queue 
 ADD COLUMN IF NOT EXISTS payment_status VARCHAR(32) DEFAULT 'PENDING';
 
 ALTER TABLE public.chill_kiosk_queue 
 ADD COLUMN IF NOT EXISTS payment_reference TEXT;
+
+ALTER TABLE public.chill_kiosk_queue 
+ADD COLUMN IF NOT EXISTS updatedat TIMESTAMPTZ DEFAULT NOW();
 
 -- 2. Optional check constraint for known payment states
 DO $$

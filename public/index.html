@@ -138,9 +138,11 @@
     <div class="hero-grid">
       <div class="hero-banner" id="quizBannerCard" style="margin-bottom: 0;">
         <div class="hero-text">
-          <small>Your virtual barista</small>
-          <h2>Not sure what to get?</h2>
-          <button style="pointer-events: none; margin-top: 15px; background: white; color: var(--primary); border: none; padding: 12px 24px; border-radius: 50px; font-family: var(--sans); font-weight: 800; font-size: 14px; position: relative; z-index: 2; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">Find my vibe</button>
+          <div class="hero-titles">
+            <small>Your virtual barista</small>
+            <h2>Not sure what to get?</h2>
+          </div>
+          <button class="hero-vibe-btn" style="pointer-events: none;">Find my vibe</button>
         </div>
       </div>
       
@@ -269,11 +271,6 @@
       Cash
     </label>
     <label class="pay-radio">
-      <input type="radio" name="payment" value="E-Wallets">
-      <span class="pay-custom"></span>
-      E-Wallets
-    </label>
-    <label class="pay-radio">
       <input type="radio" name="payment" value="PayMongo Cashless Payment">
       <span class="pay-custom"></span>
       PayMongo Cashless Payment
@@ -284,17 +281,13 @@
     <p>Please pay at the cashier upfront to process your order.</p>
     <p style="margin-top: 8px; font-size: 11px; color: #e74c3c; font-weight: 700;">* Discount IDs should be shown over the counter for validation</p>
   </div>
-  
-  <div id="panel-digital" class="pay-panel hidden">
-    <select id="ewalletSelect" class="ewallet-dropdown">
-      <option value="GCash">GCash</option>
-      <option value="PayPal">PayPal</option>
-    </select>
-    <p>Scan the QR to pay</p>
-  </div>
 
   <div id="panel-paymongo" class="pay-panel hidden">
-    <p>Pay securely via GCash, Maya, GrabPay, or Card through PayMongo Hosted Checkout.</p>
+    <p>Pay securely via <strong>GCash, Card, Maya, or GrabPay</strong> through the official PayMongo Hosted Checkout page.</p>
+    <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 11.5px; color: var(--muted);">
+      <span style="background: rgba(139, 92, 246, 0.15); color: #8B5CF6; padding: 2px 8px; border-radius: 12px; font-weight: 700; font-size: 10px;">TEST MODE</span>
+      <span>Actual PayMongo checkout with simulated GCash test authorization</span>
+    </div>
   </div>
 </div>
 

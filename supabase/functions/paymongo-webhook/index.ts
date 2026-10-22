@@ -41,7 +41,7 @@ async function verifyPayMongoSignature(
 
     return computedHex.toLowerCase() === signature.toLowerCase();
   } catch (err) {
-    console.error("Signature verification exception:", err);
+    console.error("PayMongo signature verification exception:", err);
     return false;
   }
 }
@@ -96,46 +96,104 @@ serve(async (req: Request) => {
     const eventType = event?.data?.attributes?.type;
     const eventData = event?.data?.attributes?.data;
 
-    // Supported event: checkout_session.payment.paid or payment.paid
+    // Supported events: checkout_session.payment.paid or payment.paid
     const checkoutRef =
       eventData?.attributes?.reference_number ||
       eventData?.attributes?.description?.match(/#([0-9]{4,6})/)?.[1] ||
+      eventData?.attributes?.payments?.[0]?.attributes?.description?.match(/#([0-9]{4,6})/)?.[1] ||
       null;
 
-    const checkoutSessionId = eventData?.id || null;
-    const nowIso = new Date().toISOString();
+    const checkoutSessionId =
+      eventData?.type === "checkout_session"
+        ? eventData?.id
+        : (eventData?.attributes?.checkout_session_id || null);
 
+    const paymentId =
+      eventData?.type === "payment"
+        ? eventData?.id
+        : (eventData?.attributes?.payments?.[0]?.id || null);
+
+    const paymentMethodType =
+      eventData?.attributes?.payment_method_used ||
+      eventData?.attributes?.payments?.[0]?.attributes?.source?.type ||
+      eventData?.attributes?.source?.type ||
+      "";
+
+    const paymentMethodLabel = paymentMethodType
+      ? `PayMongo (${paymentMethodType.toUpperCase()}) (TEST MODE)`
+      : "PayMongo Cashless (TEST MODE)";
+
+    const nowIso = new Date().toISOString();
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Build update payload: update payment_status and POS status to 'paid' authoritatively
+    const updatePayload: Record<string, unknown> = {
+      payment_status: "PAID",
+      status: "paid", // Authoritative POS status: confirmed paid
+      paymentmethod: paymentMethodLabel,
+    };
+
+    if (checkoutSessionId) {
+      updatePayload.payment_reference = checkoutSessionId;
+    } else if (paymentId) {
+      updatePayload.payment_reference = paymentId;
+    }
+
+    let recordsUpdated = 0;
+
+    // 1. Primary lookup by kiosk order number
     if (checkoutRef) {
-      // 1. Authoritative update of chill_kiosk_queue to PAID
-      const { data: updatedQueue, error: queueErr } = await supabaseAdmin
+      // First attempt with updatedat
+      let { data: updatedQueue, error: queueErr } = await supabaseAdmin
         .from("chill_kiosk_queue")
-        .update({
-          payment_status: "PAID",
-          paymentmethod: "PayMongo Cashless (TEST MODE)",
-          updatedat: nowIso,
-        })
+        .update({ ...updatePayload, updatedat: nowIso })
         .eq("kioskordernumber", String(checkoutRef))
         .select();
 
-      if (queueErr) {
-        console.error("Failed to update payment_status in chill_kiosk_queue:", queueErr);
-      } else {
-        console.log(`Successfully verified order #${checkoutRef} as PAID`);
+      if (queueErr && (queueErr.code === "42703" || queueErr.message?.includes("updatedat"))) {
+        // Fallback without updatedat if column does not exist
+        const fbResult = await supabaseAdmin
+          .from("chill_kiosk_queue")
+          .update(updatePayload)
+          .eq("kioskordernumber", String(checkoutRef))
+          .select();
+        updatedQueue = fbResult.data;
+        queueErr = fbResult.error;
       }
-    } else if (checkoutSessionId) {
-      // Fallback matching by payment_reference
-      await supabaseAdmin
-        .from("chill_kiosk_queue")
-        .update({
-          payment_status: "PAID",
-          updatedat: nowIso,
-        })
-        .eq("payment_reference", checkoutSessionId);
+
+      if (queueErr) {
+        console.error("Failed to update payment_status by order number:", queueErr);
+      } else {
+        recordsUpdated = updatedQueue?.length || 0;
+        console.log(`Successfully verified order #${checkoutRef} as PAID (updated ${recordsUpdated} rows)`);
+      }
     }
 
-    return new Response(JSON.stringify({ received: true }), {
+    // 2. Fallback lookup by payment_reference if order number didn't match
+    if (recordsUpdated === 0 && checkoutSessionId) {
+      let { data: refUpdated, error: refErr } = await supabaseAdmin
+        .from("chill_kiosk_queue")
+        .update({ ...updatePayload, updatedat: nowIso })
+        .eq("payment_reference", checkoutSessionId)
+        .select();
+
+      if (refErr && (refErr.code === "42703" || refErr.message?.includes("updatedat"))) {
+        const refFb = await supabaseAdmin
+          .from("chill_kiosk_queue")
+          .update(updatePayload)
+          .eq("payment_reference", checkoutSessionId)
+          .select();
+        refUpdated = refFb.data;
+        refErr = refFb.error;
+      }
+
+      if (!refErr && refUpdated && refUpdated.length > 0) {
+        recordsUpdated = refUpdated.length;
+        console.log(`Successfully verified payment_reference ${checkoutSessionId} as PAID (updated ${recordsUpdated} rows)`);
+      }
+    }
+
+    return new Response(JSON.stringify({ received: true, eventType, orderNumber: checkoutRef, updated: recordsUpdated }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
